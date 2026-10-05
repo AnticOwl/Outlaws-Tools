@@ -1,11 +1,13 @@
 #pragma once
 #include <cstdint>
-#include <string_view>
+#include "EnvironmentRegistry.h"
 
 namespace outlaws {
 struct GameBindings {
     std::uintptr_t moduleBase{};
     bool initialized{};
+    bool environmentRegistryFound{};
+    EnvironmentRegistry environmentRegistry{};
 
     bool initialize();
     void shutdown();
