@@ -41,9 +41,15 @@ public:
     static constexpr std::uintptr_t ConstructorRva = 0x178A240;
     static constexpr std::size_t DescriptorStride = 0x40;
 
+    static constexpr KnownEnvDescriptor OutdoorFogDensity{0x12, 0x0450, 0x5C98810, "Env_OutdoorFogDensity"};
+    static constexpr KnownEnvDescriptor BloomStrength{0x2C, 0x0AD0, 0x5C98B48, "Env_BloomStrength2"};
+    static constexpr KnownEnvDescriptor GlareStrength{0x36, 0x0D50, 0x5C98C38, "Env_GlareStrength"};
     static constexpr KnownEnvDescriptor ExposureTarget{0x52, 0x1450, 0x5C98F88, "Env_ExposureTarget2"};
+    static constexpr KnownEnvDescriptor VolCloudCoverage{0xA1, 0x2810, 0x5C998A8, "Env_VolCloudCoverage"};
     static constexpr KnownEnvDescriptor GameplayRain{0xD0, 0x33D0, 0x5C99DC0, "Env_GameplayRainAmount"};
     static constexpr KnownEnvDescriptor GameplayFog{0xD1, 0x3410, 0x5C99DD8, "Env_GameplayFogAmount"};
+    static constexpr KnownEnvDescriptor FilmGrainAmount{0xE9, 0x3A10, 0x5C9A010, "Env_FilmGrainAmount"};
+    static constexpr KnownEnvDescriptor LensFlareEnabled{0x177, 0x5D90, 0x5C9B200, "Env_LensFlareEnabled"};
 
     bool locate(std::uintptr_t moduleBase) noexcept;
     void setDescriptorOwner(std::uintptr_t owner) noexcept { owner_ = owner; }
