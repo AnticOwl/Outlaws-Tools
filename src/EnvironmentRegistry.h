@@ -33,6 +33,7 @@ static_assert(offsetof(EnvDescriptor, typeInfo) == 0x20);
 struct KnownEnvDescriptor {
     std::uint16_t id;
     std::ptrdiff_t descriptorOffset;
+    std::uintptr_t nameRva;
     std::string_view name;
 };
 
@@ -41,10 +42,11 @@ public:
     static constexpr std::uintptr_t ConstructorRva = 0x178A240;
     static constexpr std::size_t DescriptorStride = 0x40;
 
-    static constexpr KnownEnvDescriptor ExposureTarget{0x52, 0x1480, "Env_ExposureTarget2"};
-    static constexpr KnownEnvDescriptor GameplayRain{0xD0, 0x3400, "Env_GameplayRainAmount"};
-    static constexpr KnownEnvDescriptor GameplayFog{0xD1, 0x3440, "Env_GameplayFogAmount"};
+    static constexpr KnownEnvDescriptor ExposureTarget{0x52, 0x1480, 0x5C98F88, "Env_ExposureTarget2"};
+    static constexpr KnownEnvDescriptor GameplayRain{0xD0, 0x3400, 0x5C99DC0, "Env_GameplayRainAmount"};
+    static constexpr KnownEnvDescriptor GameplayFog{0xD1, 0x3440, 0x5C99DD8, "Env_GameplayFogAmount"};
 
+    bool locate(std::uintptr_t moduleBase) noexcept;
     void setDescriptorOwner(std::uintptr_t owner) noexcept { owner_ = owner; }
     [[nodiscard]] std::uintptr_t descriptorOwner() const noexcept { return owner_; }
     [[nodiscard]] const EnvDescriptor* descriptor(const KnownEnvDescriptor& known) const noexcept;
