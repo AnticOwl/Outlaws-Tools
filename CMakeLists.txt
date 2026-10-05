@@ -8,6 +8,8 @@ add_library(OutlawsTools SHARED
     src/dllmain.cpp
     src/ToolRuntime.cpp
     src/GameBindings.cpp
+    src/PatternScanner.cpp
+    src/EnvironmentRegistry.cpp
     src/LightSystem.cpp
     src/EnvironmentSystem.cpp
     src/PostProcessSystem.cpp
