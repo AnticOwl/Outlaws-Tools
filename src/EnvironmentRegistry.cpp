@@ -35,9 +35,10 @@ bool EnvironmentRegistry::locate(std::uintptr_t moduleBase) noexcept {
     owner_ = 0;
     if (!moduleBase) return false;
 
-    const auto exposureName = moduleBase + ExposureTarget.nameRva;
-    const auto rainName = moduleBase + GameplayRain.nameRva;
-    const auto fogName = moduleBase + GameplayFog.nameRva;
+    const auto* exposureName = reinterpret_cast<const char*>(moduleBase + ExposureTarget.nameRva);
+    const auto* rainName = reinterpret_cast<const char*>(moduleBase + GameplayRain.nameRva);
+    const auto* fogName = reinterpret_cast<const char*>(moduleBase + GameplayFog.nameRva);
+    const auto exposureNameAddress = reinterpret_cast<std::uintptr_t>(exposureName);
     const auto exposureNameOffset = ExposureTarget.descriptorOffset + offsetof(EnvDescriptor, name);
 
     SYSTEM_INFO si{};
@@ -59,7 +60,7 @@ bool EnvironmentRegistry::locate(std::uintptr_t moduleBase) noexcept {
         if (canRead && mbi.RegionSize >= sizeof(std::uintptr_t)) {
             auto scan = (regionBegin + alignof(std::uintptr_t) - 1) & ~(alignof(std::uintptr_t) - 1);
             for (; scan + sizeof(std::uintptr_t) <= regionEnd; scan += sizeof(std::uintptr_t)) {
-                if (*reinterpret_cast<const std::uintptr_t*>(scan) != exposureName || scan < exposureNameOffset) continue;
+                if (*reinterpret_cast<const std::uintptr_t*>(scan) != exposureNameAddress || scan < exposureNameOffset) continue;
 
                 const auto candidate = scan - exposureNameOffset;
                 const auto* exposure = reinterpret_cast<const EnvDescriptor*>(candidate + ExposureTarget.descriptorOffset);
