@@ -25,13 +25,29 @@ The matched slot is passed to:
 Outlaws.exe+0x33452E0
 ```
 
-This block appears to be a runtime binding/serialization layer rather than the original descriptor registry. It is significant because the slots are regular and are selected by the actual Environment variable names.
+## Correct subsystem identification
+
+The owner of this dispatch is not the visual Environment renderer. Its function table is immediately followed by audio/RTPC identifiers including:
+
+- `TimeOfDayRTPC`
+- `WeatherPrecipitationIntensityRTPC`
+- `WeatherWindIntensityRTPC`
+- `WeatherTemperatureRTPC`
+- `WeatherViewDistanceRTPC`
+
+This identifies the block as a **weather audio/RTPC binding layer**. The fixed slots above therefore represent audio-side bindings derived from `Env_*` variables rather than the authoritative visual Environment values themselves.
+
+`Outlaws.exe+0x33452E0` converts a Snowdrop variant/value into the typed binding slot used by this RTPC object.
+
+## Why it still matters
+
+This confirms that `Env_*` names are consumed at runtime outside the descriptor constructor and gives us one concrete example of how Snowdrop resolves a named Environment variable into a typed consumer. It is useful for understanding the variable plumbing, but it should not be used as the visual Environment write path.
 
 ## Next steps
 
-1. Reverse `Outlaws.exe+0x33452E0` to determine the slot type and whether it stores a live value, binding handle, or serialized wrapper.
-2. Find callers of the enclosing dispatch routine to identify the owner object lifecycle.
-3. Compare changes to `+0x38` / `+0x178` / `+0x268` with live Rain/Fog/Wind changes once a safe diagnostic path is available.
-4. Search for equivalent runtime xrefs for `Env_ExposureTarget2`, `Env_BloomStrength2`, and `Env_LensFlareEnabled`.
+1. Keep the descriptor registry path for authoritative `Env_*` metadata.
+2. Search for additional runtime xrefs for `Env_ExposureTarget2`, `Env_BloomStrength2`, `Env_LensFlareEnabled`, and other visual-only variables; those should lead to renderer/post-process consumers rather than RTPC consumers.
+3. Identify visual consumers of `Env_OutdoorFogDensity` and `Env_GameplayRainAmount` that are distinct from this audio layer.
+4. Do not write to the RTPC binding object when implementing Environment sliders.
 
-No write is enabled from this mapping yet.
+No write is enabled from this mapping.
