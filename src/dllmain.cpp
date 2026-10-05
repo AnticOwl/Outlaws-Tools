@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <cstdint>
 #include "ToolRuntime.h"
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
@@ -16,4 +17,9 @@ extern "C" __declspec(dllexport) bool OutlawsTools_Start() {
 
 extern "C" __declspec(dllexport) void OutlawsTools_Stop() {
     outlaws::ToolRuntime::instance().stop();
+}
+
+extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetEnvRegistryOwner() {
+    const auto& bindings = outlaws::ToolRuntime::instance().bindings;
+    return bindings.environmentRegistryFound ? bindings.environmentRegistry.descriptorOwner() : 0;
 }
