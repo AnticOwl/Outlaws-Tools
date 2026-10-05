@@ -34,20 +34,30 @@ public:
     static constexpr std::uintptr_t AreaTypeGlobalRva  = 0x96BE680;
     static constexpr std::uintptr_t BaseTypeGlobalRva  = 0x96669D0;
 
-    // Confirmed allocation wrappers and constructors from static analysis.
-    // These construct the light-class objects but are NOT called by spawnPoint/spawnSpot yet:
-    // world/entity registration and ownership still need to be recovered first.
-    static constexpr std::uintptr_t PointFactoryRva = 0x1D4E090;
-    static constexpr std::uintptr_t PointConstructorRva = 0x194E220;
-    static constexpr std::size_t PointObjectSize = 0x38;
+    // Confirmed Snowdrop schema/type-description allocation wrappers.
+    // IMPORTANT: these allocate reflection/schema objects and register property IDs;
+    // they are NOT world-light spawners and must never be used by spawnPoint/spawnSpot.
+    static constexpr std::uintptr_t PointSchemaFactoryRva = 0x1D4E090;
+    static constexpr std::uintptr_t PointSchemaConstructorRva = 0x194E220;
+    static constexpr std::size_t PointSchemaObjectSize = 0x38;
 
-    static constexpr std::uintptr_t SpotFactoryRva = 0x1D4E4C0;
-    static constexpr std::uintptr_t SpotConstructorRva = 0x1950560;
-    static constexpr std::size_t SpotObjectSize = 0x40;
+    static constexpr std::uintptr_t SpotSchemaFactoryRva = 0x1D4E4C0;
+    static constexpr std::uintptr_t SpotSchemaConstructorRva = 0x1950560;
+    static constexpr std::size_t SpotSchemaObjectSize = 0x40;
 
-    static constexpr std::uintptr_t TubeFactoryRva = 0x1D4E5E0;
-    static constexpr std::uintptr_t TubeConstructorRva = 0x1951360;
-    static constexpr std::size_t TubeObjectSize = 0x40;
+    static constexpr std::uintptr_t TubeSchemaFactoryRva = 0x1D4E5E0;
+    static constexpr std::uintptr_t TubeSchemaConstructorRva = 0x1951360;
+    static constexpr std::size_t TubeSchemaObjectSize = 0x40;
+
+    // Prefab node registration path. All four light prefab nodes are registered through
+    // the common Snowdrop dispatcher at 0x0BA6660. Point/Spot are then post-processed
+    // through 0x0C79C20 during node registration.
+    static constexpr std::uintptr_t PrefabNodeDispatcherRva = 0x0BA6660;
+    static constexpr std::uintptr_t PrefabNodeFinalizeRva   = 0x0C79C20;
+    static constexpr std::uintptr_t PointPrefabRegistrationRva = 0x1DAE4EC;
+    static constexpr std::uintptr_t SpotPrefabRegistrationRva  = 0x1DAE536;
+    static constexpr std::uintptr_t TubePrefabRegistrationRva  = 0x1DAE580;
+    static constexpr std::uintptr_t AreaPrefabRegistrationRva  = 0x1DAE5CA;
 
     void bind(std::uintptr_t moduleBase) noexcept { moduleBase_ = moduleBase; }
     [[nodiscard]] std::uintptr_t pointTypeDescriptor() const noexcept;
