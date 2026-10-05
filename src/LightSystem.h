@@ -66,6 +66,14 @@ public:
     static constexpr std::uintptr_t SpotNodeExecuteRva  = 0x19ACE20;
     static constexpr std::uintptr_t TubeNodeExecuteRva  = 0x19AF2E0;
 
+    // Shared renderer creation/registration path. Spot calls GenericRendererCreateRva
+    // and stores the returned 32-bit renderer handle. ExistingManagerCreateRva is the
+    // lower path used when the renderer manager already owns its live internal object.
+    // These are intentionally diagnostic-only until the owner/resource contract is
+    // validated live.
+    static constexpr std::uintptr_t GenericRendererCreateRva = 0x1B70C20;
+    static constexpr std::uintptr_t ExistingManagerCreateRva = 0x1B70650;
+
     // The Tube execution path contains an explicit renderer registration state bit and
     // calls this add/remove pair. These are recorded for reverse-engineering only until
     // their exact renderer-object contract is proven for Point/Spot as well.
