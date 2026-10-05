@@ -6,7 +6,7 @@ namespace outlaws {
 struct Vec3 { float x{}, y{}, z{}; };
 struct Color3 { float r{1.f}, g{1.f}, b{1.f}; };
 
-enum class LightType : std::uint8_t { Unknown, Point, Spot, Area, Directional };
+enum class LightType : std::uint8_t { Unknown, Point, Spot, Tube, Area, Directional };
 
 struct LightHandle {
     std::uintptr_t address{};
@@ -23,6 +23,24 @@ struct LightHandle {
 
 class LightSystem {
 public:
+    static constexpr std::uintptr_t PointTypeGetterRva = 0x19C7C90;
+    static constexpr std::uintptr_t SpotTypeGetterRva  = 0x19C7DE0;
+    static constexpr std::uintptr_t TubeTypeGetterRva  = 0x19C7E50;
+    static constexpr std::uintptr_t BaseTypeGetterRva  = 0x19C7C80;
+
+    static constexpr std::uintptr_t PointTypeGlobalRva = 0x9666900;
+    static constexpr std::uintptr_t SpotTypeGlobalRva  = 0x9666A50;
+    static constexpr std::uintptr_t TubeTypeGlobalRva  = 0x9666908;
+    static constexpr std::uintptr_t AreaTypeGlobalRva  = 0x96BE680;
+    static constexpr std::uintptr_t BaseTypeGlobalRva  = 0x96669D0;
+
+    void bind(std::uintptr_t moduleBase) noexcept { moduleBase_ = moduleBase; }
+    [[nodiscard]] std::uintptr_t pointTypeDescriptor() const noexcept;
+    [[nodiscard]] std::uintptr_t spotTypeDescriptor() const noexcept;
+    [[nodiscard]] std::uintptr_t tubeTypeDescriptor() const noexcept;
+    [[nodiscard]] std::uintptr_t baseTypeDescriptor() const noexcept;
+    [[nodiscard]] std::uintptr_t areaTypeDescriptor() const noexcept;
+
     bool scan();
     bool refresh();
     LightHandle* selected();
@@ -34,6 +52,9 @@ public:
 
     const std::vector<LightHandle>& lights() const { return m_lights; }
 private:
+    [[nodiscard]] std::uintptr_t readTypeGlobal(std::uintptr_t rva) const noexcept;
+
+    std::uintptr_t moduleBase_{};
     std::vector<LightHandle> m_lights;
     std::size_t m_selected{};
 };
