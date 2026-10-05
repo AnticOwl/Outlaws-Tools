@@ -34,6 +34,21 @@ public:
     static constexpr std::uintptr_t AreaTypeGlobalRva  = 0x96BE680;
     static constexpr std::uintptr_t BaseTypeGlobalRva  = 0x96669D0;
 
+    // Confirmed allocation wrappers and constructors from static analysis.
+    // These construct the light-class objects but are NOT called by spawnPoint/spawnSpot yet:
+    // world/entity registration and ownership still need to be recovered first.
+    static constexpr std::uintptr_t PointFactoryRva = 0x1D4E090;
+    static constexpr std::uintptr_t PointConstructorRva = 0x194E220;
+    static constexpr std::size_t PointObjectSize = 0x38;
+
+    static constexpr std::uintptr_t SpotFactoryRva = 0x1D4E4C0;
+    static constexpr std::uintptr_t SpotConstructorRva = 0x1950560;
+    static constexpr std::size_t SpotObjectSize = 0x40;
+
+    static constexpr std::uintptr_t TubeFactoryRva = 0x1D4E5E0;
+    static constexpr std::uintptr_t TubeConstructorRva = 0x1951360;
+    static constexpr std::size_t TubeObjectSize = 0x40;
+
     void bind(std::uintptr_t moduleBase) noexcept { moduleBase_ = moduleBase; }
     [[nodiscard]] std::uintptr_t pointTypeDescriptor() const noexcept;
     [[nodiscard]] std::uintptr_t spotTypeDescriptor() const noexcept;
