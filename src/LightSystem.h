@@ -59,6 +59,19 @@ public:
     static constexpr std::uintptr_t TubePrefabRegistrationRva  = 0x1DAE580;
     static constexpr std::uintptr_t AreaPrefabRegistrationRva  = 0x1DAE5CA;
 
+    // Confirmed prefab-light node execution handlers. These consume Snowdrop node
+    // execution parameters (including the parameter containers at +0x830/+0x840),
+    // so they are NOT safe to call without constructing a valid execution context.
+    static constexpr std::uintptr_t PointNodeExecuteRva = 0x19A50D0;
+    static constexpr std::uintptr_t SpotNodeExecuteRva  = 0x19ACE20;
+    static constexpr std::uintptr_t TubeNodeExecuteRva  = 0x19AF2E0;
+
+    // The Tube execution path contains an explicit renderer registration state bit and
+    // calls this add/remove pair. These are recorded for reverse-engineering only until
+    // their exact renderer-object contract is proven for Point/Spot as well.
+    static constexpr std::uintptr_t TubeRendererRegisterRva   = 0x1C57B70;
+    static constexpr std::uintptr_t TubeRendererUnregisterRva = 0x1CB8FF0;
+
     void bind(std::uintptr_t moduleBase) noexcept { moduleBase_ = moduleBase; }
     [[nodiscard]] std::uintptr_t pointTypeDescriptor() const noexcept;
     [[nodiscard]] std::uintptr_t spotTypeDescriptor() const noexcept;
