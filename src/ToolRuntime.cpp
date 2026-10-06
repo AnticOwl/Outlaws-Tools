@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <cstdio>
 
 namespace outlaws {
 namespace {
