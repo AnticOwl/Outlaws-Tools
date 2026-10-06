@@ -169,6 +169,7 @@ void PostProcessSystem::environmentUpdateDetour(void* environmentSystem) {
     if (!self) return;
 
     self->onEnvironmentUpdate(environmentSystem);
+    self->logPreviousQueueDrain(environmentSystem);
 
     auto original = reinterpret_cast<EnvironmentUpdateFn>(self->environmentUpdateTrampoline_);
     if (original) original(environmentSystem);
@@ -221,6 +222,8 @@ bool PostProcessSystem::setFloat(std::uint16_t id, float value, const char* labe
         return false;
     }
 
+    logDescriptorDefault(id, false, label);
+
     pendingId_ = id;
     pendingValueBits_ = std::bit_cast<std::uint32_t>(value);
     pendingKind_ = 1;
@@ -236,6 +239,8 @@ bool PostProcessSystem::setBool(std::uint16_t id, bool value, const char* label)
         appendLog("post queue: EnvironmentSystem not captured yet");
         return false;
     }
+
+    logDescriptorDefault(id, true, label);
 
     pendingId_ = id;
     pendingValueBits_ = value ? 1u : 0u;
@@ -255,25 +260,103 @@ void PostProcessSystem::processPending(void* environmentSystem) noexcept {
     const auto id = pendingId_.load();
     const auto bits = pendingValueBits_.load();
 
+    std::uint32_t slot = 0;
+    const auto before = queueCountForCurrentThread(environmentSystem, &slot);
+
     if (kind == 1) {
         const float value = std::bit_cast<float>(bits);
         auto setter = reinterpret_cast<FloatSetterFn>(moduleBase_ + FloatSetterRva);
         setter(environmentSystem, id, value, lastFlags_.load(), lastExtra_.load());
 
-        char line[160]{};
-        std::snprintf(line, sizeof(line), "post native-thread float id=0x%X value=%g",
-            static_cast<unsigned>(id), value);
+        char line[192]{};
+        std::snprintf(line, sizeof(line),
+            "post native-thread float id=0x%X value=%g slot=%u queueBefore=%u",
+            static_cast<unsigned>(id), value, slot, before);
         appendLog(line);
     } else if (kind == 2) {
         const bool value = bits != 0;
         auto setter = reinterpret_cast<BoolSetterFn>(moduleBase_ + BoolSetterRva);
         setter(environmentSystem, id, value, lastFlags_.load(), lastExtra_.load());
 
-        char line[160]{};
-        std::snprintf(line, sizeof(line), "post native-thread bool id=0x%X value=%s",
-            static_cast<unsigned>(id), value ? "ON" : "OFF");
+        char line[192]{};
+        std::snprintf(line, sizeof(line),
+            "post native-thread bool id=0x%X value=%s slot=%u queueBefore=%u",
+            static_cast<unsigned>(id), value ? "ON" : "OFF", slot, before);
         appendLog(line);
     }
+
+    const auto after = queueCountForCurrentThread(environmentSystem, nullptr);
+
+    queueWatchSlot_ = slot;
+    queueWatchBefore_ = before;
+    queueWatchAfter_ = after;
+    queueWatchId_ = id;
+    queueWatchActive_ = true;
+
+    char line[192]{};
+    std::snprintf(line, sizeof(line),
+        "post queue accepted id=0x%X slot=%u count %u -> %u",
+        static_cast<unsigned>(id), slot, before, after);
+    appendLog(line);
+}
+
+void PostProcessSystem::logDescriptorDefault(std::uint16_t id, bool isBool, const char* label) noexcept {
+    if (!moduleBase_ || id >= 0x1E8) return;
+
+    const auto descriptor = moduleBase_ + EnvRegistryOwnerRva
+        + static_cast<std::uintptr_t>(id) * 0x40u - 0x30u;
+
+    if (isBool) {
+        const bool value = *reinterpret_cast<const std::uint8_t*>(descriptor) != 0;
+        char line[192]{};
+        std::snprintf(line, sizeof(line),
+            "post descriptor default %s id=0x%X = %s",
+            label ? label : "bool", static_cast<unsigned>(id), value ? "ON" : "OFF");
+        appendLog(line);
+    } else {
+        const auto bits = *reinterpret_cast<const std::uint32_t*>(descriptor);
+        const float value = std::bit_cast<float>(bits);
+        char line[192]{};
+        std::snprintf(line, sizeof(line),
+            "post descriptor default %s id=0x%X = %g",
+            label ? label : "float", static_cast<unsigned>(id), value);
+        appendLog(line);
+    }
+}
+
+std::uint32_t PostProcessSystem::queueCountForCurrentThread(
+    void* environmentSystem, std::uint32_t* slotOut) noexcept {
+    if (!environmentSystem || !moduleBase_) return 0;
+
+    using ThreadSlotFn = int(*)();
+    auto threadSlot = reinterpret_cast<ThreadSlotFn>(moduleBase_ + ThreadSlotRva);
+    const int slot = threadSlot();
+    if (slot < 0 || slot >= 0x1000) return 0;
+
+    if (slotOut) *slotOut = static_cast<std::uint32_t>(slot);
+
+    const auto lane = reinterpret_cast<const std::uint8_t*>(environmentSystem)
+        + static_cast<std::size_t>(slot) * 0x10u;
+
+    return *reinterpret_cast<const std::uint32_t*>(lane + 0x8);
+}
+
+void PostProcessSystem::logPreviousQueueDrain(void* environmentSystem) noexcept {
+    if (!queueWatchActive_.exchange(false)) return;
+
+    std::uint32_t slot = 0;
+    const auto current = queueCountForCurrentThread(environmentSystem, &slot);
+    const auto expectedSlot = queueWatchSlot_.load();
+
+    char line[224]{};
+    std::snprintf(line, sizeof(line),
+        "post queue next-frame id=0x%X expectedSlot=%u currentSlot=%u count=%u (afterWrite=%u)",
+        static_cast<unsigned>(queueWatchId_.load()),
+        expectedSlot,
+        slot,
+        current,
+        queueWatchAfter_.load());
+    appendLog(line);
 }
 
 bool PostProcessSystem::setExposure(float value) noexcept {
