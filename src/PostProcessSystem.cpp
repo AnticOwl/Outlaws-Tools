@@ -223,39 +223,76 @@ void PostProcessSystem::onFloatSetter(void* environmentSystem, std::uint16_t id,
 
 bool PostProcessSystem::setFloat(std::uint16_t id, float value, const char* label) noexcept {
     if (!ready()) {
-        appendLog("post queue: EnvironmentSystem not captured yet");
+        appendLog("post direct: EnvironmentSystem not captured yet");
         return false;
     }
 
     logDescriptorDefault(id, false, label);
-    logRuntimeBefore(label, false);
 
-    pendingId_ = id;
-    pendingValueBits_ = std::bit_cast<std::uint32_t>(value);
-    pendingKind_ = 1;
+    auto* record = static_cast<std::uint8_t*>(lookupRuntimeValue(label));
+    if (!record) {
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "post DIRECT %s = <record not found>",
+            label ? label : "float");
+        appendLog(line);
+        return false;
+    }
 
-    char line[160]{};
-    std::snprintf(line, sizeof(line), "post queued %s -> %g", label ? label : "float", value);
+    auto* liveValue = reinterpret_cast<float*>(record + 0x10);
+    const float before = *liveValue;
+    *liveValue = value;
+    const float immediate = *liveValue;
+
+    runtimeWatchId_ = id;
+    runtimeWatchIsBool_ = false;
+    runtimeWatchActive_ = true;
+
+    char line[256]{};
+    std::snprintf(line, sizeof(line),
+        "post DIRECT %s id=0x%X record=0x%llX value %g -> %g immediate=%g",
+        label ? label : "float",
+        static_cast<unsigned>(id),
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)),
+        before, value, immediate);
     appendLog(line);
     return true;
 }
 
 bool PostProcessSystem::setBool(std::uint16_t id, bool value, const char* label) noexcept {
     if (!ready()) {
-        appendLog("post queue: EnvironmentSystem not captured yet");
+        appendLog("post direct: EnvironmentSystem not captured yet");
         return false;
     }
 
     logDescriptorDefault(id, true, label);
-    logRuntimeBefore(label, true);
 
-    pendingId_ = id;
-    pendingValueBits_ = value ? 1u : 0u;
-    pendingKind_ = 2;
+    auto* record = static_cast<std::uint8_t*>(lookupRuntimeValue(label));
+    if (!record) {
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "post DIRECT %s = <record not found>",
+            label ? label : "bool");
+        appendLog(line);
+        return false;
+    }
 
-    char line[160]{};
-    std::snprintf(line, sizeof(line), "post queued %s -> %s",
-        label ? label : "bool", value ? "ON" : "OFF");
+    auto* liveValue = record + 0x10;
+    const bool before = *liveValue != 0;
+    *liveValue = value ? 1u : 0u;
+    const bool immediate = *liveValue != 0;
+
+    runtimeWatchId_ = id;
+    runtimeWatchIsBool_ = true;
+    runtimeWatchActive_ = true;
+
+    char line[256]{};
+    std::snprintf(line, sizeof(line),
+        "post DIRECT %s id=0x%X record=0x%llX value %s -> %s immediate=%s",
+        label ? label : "bool",
+        static_cast<unsigned>(id),
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)),
+        before ? "ON" : "OFF",
+        value ? "ON" : "OFF",
+        immediate ? "ON" : "OFF");
     appendLog(line);
     return true;
 }
