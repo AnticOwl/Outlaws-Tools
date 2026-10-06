@@ -2,9 +2,22 @@
 #include <cstdint>
 #include "ToolRuntime.h"
 
+namespace {
+DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
+    outlaws::ToolRuntime::instance().start();
+    return 0;
+}
+}
+
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(module);
+
+        // Start outside the loader-lock path. For normal testing, injection is enough:
+        // no manual call to OutlawsTools_Start() is required.
+        if (HANDLE thread = CreateThread(nullptr, 0, OutlawsTools_Bootstrap, nullptr, 0, nullptr)) {
+            CloseHandle(thread);
+        }
     } else if (reason == DLL_PROCESS_DETACH) {
         outlaws::ToolRuntime::instance().stop();
     }
