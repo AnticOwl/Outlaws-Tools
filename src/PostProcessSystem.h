@@ -6,7 +6,9 @@ namespace outlaws {
 
 class PostProcessSystem {
 public:
+    static constexpr std::uintptr_t EnvRegistryOwnerRva  = 0x9658C70;
     static constexpr std::uintptr_t EnvironmentUpdateRva = 0x17B9CA0;
+    static constexpr std::uintptr_t ThreadSlotRva        = 0x0CD6BE0;
     static constexpr std::uintptr_t FloatSetterRva       = 0x17D9C20;
     static constexpr std::uintptr_t BoolSetterRva        = 0x17D9CF0;
 
@@ -65,6 +67,9 @@ private:
     bool setFloat(std::uint16_t id, float value, const char* label) noexcept;
     bool setBool(std::uint16_t id, bool value, const char* label) noexcept;
     void processPending(void* environmentSystem) noexcept;
+    void logDescriptorDefault(std::uint16_t id, bool isBool, const char* label) noexcept;
+    std::uint32_t queueCountForCurrentThread(void* environmentSystem, std::uint32_t* slotOut = nullptr) noexcept;
+    void logPreviousQueueDrain(void* environmentSystem) noexcept;
     void appendLog(const char* text) const noexcept;
 
     std::uintptr_t moduleBase_{};
@@ -86,6 +91,12 @@ private:
     std::atomic<int> pendingKind_{}; // 0=none, 1=float, 2=bool
     std::atomic<std::uint16_t> pendingId_{};
     std::atomic<std::uint32_t> pendingValueBits_{};
+
+    std::atomic_bool queueWatchActive_{};
+    std::atomic<std::uint32_t> queueWatchSlot_{};
+    std::atomic<std::uint32_t> queueWatchBefore_{};
+    std::atomic<std::uint32_t> queueWatchAfter_{};
+    std::atomic<std::uint16_t> queueWatchId_{};
 };
 
 }
