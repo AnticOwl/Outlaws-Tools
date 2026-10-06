@@ -16,6 +16,9 @@ DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
         if (pressed(VK_PRIOR))  runtime.environment.setTimeOfDay(18.0f);   // PageUp
         if (pressed(VK_INSERT)) runtime.environment.setTimePaused(true);
         if (pressed(VK_DELETE)) runtime.environment.setTimePaused(false);
+        if (pressed(VK_NUMPAD1)) runtime.environment.setRain(0.0f);
+        if (pressed(VK_NUMPAD2)) runtime.environment.setRain(1.0f);
+        if (pressed(VK_NUMPAD3)) runtime.environment.logRain();
         Sleep(50);
     }
     return 0;
