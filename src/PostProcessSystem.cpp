@@ -1,6 +1,5 @@
 #include "PostProcessSystem.h"
 #include <Windows.h>
-#include <bit>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -34,9 +33,7 @@ bool patchHook(std::uintptr_t targetAddress,
     auto* target = reinterpret_cast<unsigned char*>(targetAddress);
 
     MEMORY_BASIC_INFORMATION mbi{};
-    if (!VirtualQuery(target, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) {
-        return false;
-    }
+    if (!VirtualQuery(target, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) return false;
 
     std::memcpy(originalBytes, target, stolenLength);
 
@@ -95,8 +92,6 @@ bool PostProcessSystem::initialize(std::uintptr_t moduleBase) noexcept {
     environmentSystem_ = 0;
     lastFlags_ = 0;
     lastExtra_ = 0;
-    originalExposureKnown_ = false;
-    injectedWrite_ = false;
 
     if (!moduleBase_) return false;
     g_postProcess = this;
@@ -116,11 +111,6 @@ void PostProcessSystem::shutdown() noexcept {
     g_postProcess = nullptr;
     moduleBase_ = 0;
     environmentSystem_ = 0;
-    originalExposureKnown_ = false;
-}
-
-float PostProcessSystem::originalExposure() const noexcept {
-    return std::bit_cast<float>(originalExposureBits_.load());
 }
 
 void PostProcessSystem::appendLog(const char* text) const noexcept {
@@ -140,7 +130,6 @@ bool PostProcessSystem::installEnvironmentUpdateHook() noexcept {
                    environmentUpdateTrampoline_)) {
         return false;
     }
-
     appendLog("post hook: Environment update installed");
     return true;
 }
@@ -162,7 +151,6 @@ bool PostProcessSystem::installFloatSetterHook() noexcept {
                    floatSetterTrampoline_)) {
         return false;
     }
-
     appendLog("post hook: float setter installed");
     return true;
 }
@@ -193,9 +181,7 @@ void PostProcessSystem::floatSetterDetour(void* environmentSystem, std::uint16_t
     self->onFloatSetter(environmentSystem, id, value, flags, extra);
 
     auto original = reinterpret_cast<FloatSetterFn>(self->floatSetterTrampoline_);
-    if (original) {
-        original(environmentSystem, id, value, flags, extra);
-    }
+    if (original) original(environmentSystem, id, value, flags, extra);
 }
 
 void PostProcessSystem::onEnvironmentUpdate(void* environmentSystem) noexcept {
@@ -214,55 +200,136 @@ void PostProcessSystem::onEnvironmentUpdate(void* environmentSystem) noexcept {
 void PostProcessSystem::onFloatSetter(void* environmentSystem, std::uint16_t id, float value,
                                       std::uint32_t flags, std::uint32_t extra) noexcept {
     const auto ptr = reinterpret_cast<std::uintptr_t>(environmentSystem);
-    if (ptr && !environmentSystem_.load()) {
-        environmentSystem_ = ptr;
-
-        char line[128]{};
-        std::snprintf(line, sizeof(line), "post EnvironmentSystem=0x%llX",
-            static_cast<unsigned long long>(ptr));
-        appendLog(line);
-    }
+    if (ptr && !environmentSystem_.load()) environmentSystem_ = ptr;
 
     lastFlags_ = flags;
     lastExtra_ = extra;
 
-    if (id == ExposureTargetId && !injectedWrite_.load()) {
-        originalExposureBits_ = std::bit_cast<std::uint32_t>(value);
-        if (!originalExposureKnown_.exchange(true)) {
-            char line[128]{};
-            std::snprintf(line, sizeof(line), "post captured ExposureTarget2=%g", value);
-            appendLog(line);
-        }
-    }
+    char line[160]{};
+    std::snprintf(line, sizeof(line),
+        "post native float id=0x%X value=%g flags=0x%X extra=0x%X",
+        static_cast<unsigned>(id), value, flags, extra);
+    appendLog(line);
 }
 
-bool PostProcessSystem::setExposure(float value) noexcept {
+bool PostProcessSystem::setFloat(std::uint16_t id, float value, const char* label) noexcept {
     const auto env = environmentSystem_.load();
     if (!env || !moduleBase_) {
-        appendLog("post F8: EnvironmentSystem not captured yet");
+        appendLog("post write: EnvironmentSystem not captured yet");
         return false;
     }
 
     auto setter = reinterpret_cast<FloatSetterFn>(moduleBase_ + FloatSetterRva);
+    setter(reinterpret_cast<void*>(env), id, value, lastFlags_.load(), lastExtra_.load());
 
-    injectedWrite_ = true;
-    setter(reinterpret_cast<void*>(env), ExposureTargetId, value, lastFlags_.load(), lastExtra_.load());
-    injectedWrite_ = false;
-
-    char line[128]{};
-    std::snprintf(line, sizeof(line), "post ExposureTarget2 -> %g", value);
+    char line[160]{};
+    std::snprintf(line, sizeof(line), "post %s -> %g", label ? label : "float", value);
     appendLog(line);
     return true;
 }
 
-bool PostProcessSystem::restoreExposure() noexcept {
-    if (!originalExposureKnown_.load()) {
-        appendLog("post F9: original ExposureTarget2 not captured");
+bool PostProcessSystem::setBool(std::uint16_t id, bool value, const char* label) noexcept {
+    const auto env = environmentSystem_.load();
+    if (!env || !moduleBase_) {
+        appendLog("post write: EnvironmentSystem not captured yet");
         return false;
     }
-    return setExposure(originalExposure());
+
+    auto setter = reinterpret_cast<BoolSetterFn>(moduleBase_ + BoolSetterRva);
+    setter(reinterpret_cast<void*>(env), id, value, lastFlags_.load(), lastExtra_.load());
+
+    char line[160]{};
+    std::snprintf(line, sizeof(line), "post %s -> %s",
+        label ? label : "bool", value ? "ON" : "OFF");
+    appendLog(line);
+    return true;
 }
 
-bool PostProcessSystem::read(PostProcessState&) const { return false; }
-bool PostProcessSystem::apply(const PostProcessState&) { return false; }
+bool PostProcessSystem::setExposure(float value) noexcept {
+    return setFloat(ExposureTargetId, value, "ExposureTarget2");
+}
+
+bool PostProcessSystem::setBloom(float value) noexcept {
+    return setFloat(BloomStrengthId, value, "BloomStrength2");
+}
+
+bool PostProcessSystem::setGlare(float value) noexcept {
+    return setFloat(GlareStrengthId, value, "GlareStrength");
+}
+
+bool PostProcessSystem::setFilmGrainAmount(float value) noexcept {
+    return setFloat(FilmGrainAmountId, value, "FilmGrainAmount");
+}
+
+bool PostProcessSystem::setLensFlare(bool enabled) noexcept {
+    return setBool(LensFlareEnabledId, enabled, "LensFlareEnabled");
+}
+
+bool PostProcessSystem::setDepthOfField(bool enabled) noexcept {
+    return setBool(DepthOfFieldEnabledId, enabled, "DepthOfFieldEnabled");
+}
+
+bool PostProcessSystem::setFilmGrain(bool enabled) noexcept {
+    return setBool(FilmGrainEnabledId, enabled, "FilmGrainEnabled");
+}
+
+bool PostProcessSystem::setLensGlare(bool enabled) noexcept {
+    return setBool(LensGlareEnabledId, enabled, "LensGlareEnabled");
+}
+
+bool PostProcessSystem::setLensVeilingGlare(bool enabled) noexcept {
+    return setBool(LensVeilingGlareEnabledId, enabled, "LensVeilingGlareEnabled");
+}
+
+bool PostProcessSystem::setGlareEnabled(bool enabled) noexcept {
+    return setBool(GlareEnabledId, enabled, "GlareEnabled");
+}
+
+bool PostProcessSystem::setCameraLensOptics(bool enabled) noexcept {
+    return setBool(CameraLensOpticsEnabledId, enabled, "CameraLensOpticsEnabled");
+}
+
+bool PostProcessSystem::applyTestPresetOff() noexcept {
+    if (!ready()) {
+        appendLog("post preset OFF: EnvironmentSystem not captured yet");
+        return false;
+    }
+
+    bool ok = true;
+    ok &= setExposure(1.0f);
+    ok &= setBloom(0.0f);
+    ok &= setGlare(0.0f);
+    ok &= setFilmGrainAmount(0.0f);
+    ok &= setLensFlare(false);
+    ok &= setDepthOfField(false);
+    ok &= setFilmGrain(false);
+    ok &= setLensGlare(false);
+    ok &= setLensVeilingGlare(false);
+    ok &= setGlareEnabled(false);
+    ok &= setCameraLensOptics(false);
+    appendLog(ok ? "post preset OFF complete" : "post preset OFF completed with failures");
+    return ok;
+}
+
+bool PostProcessSystem::applyTestPresetOn() noexcept {
+    if (!ready()) {
+        appendLog("post preset ON: EnvironmentSystem not captured yet");
+        return false;
+    }
+
+    bool ok = true;
+    ok &= setExposure(1.0f);
+    ok &= setBloom(1.0f);
+    ok &= setGlare(1.0f);
+    ok &= setFilmGrainAmount(1.0f);
+    ok &= setLensFlare(true);
+    ok &= setDepthOfField(true);
+    ok &= setFilmGrain(true);
+    ok &= setLensGlare(true);
+    ok &= setLensVeilingGlare(true);
+    ok &= setGlareEnabled(true);
+    ok &= setCameraLensOptics(true);
+    appendLog(ok ? "post preset ON complete" : "post preset ON completed with failures");
+    return ok;
+}
 }
