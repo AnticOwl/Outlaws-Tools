@@ -1,5 +1,6 @@
 #include "PostProcessSystem.h"
 #include <Windows.h>
+#include <bit>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -171,6 +172,8 @@ void PostProcessSystem::environmentUpdateDetour(void* environmentSystem) {
 
     auto original = reinterpret_cast<EnvironmentUpdateFn>(self->environmentUpdateTrampoline_);
     if (original) original(environmentSystem);
+
+    self->processPending(environmentSystem);
 }
 
 void PostProcessSystem::floatSetterDetour(void* environmentSystem, std::uint16_t id, float value,
@@ -213,36 +216,64 @@ void PostProcessSystem::onFloatSetter(void* environmentSystem, std::uint16_t id,
 }
 
 bool PostProcessSystem::setFloat(std::uint16_t id, float value, const char* label) noexcept {
-    const auto env = environmentSystem_.load();
-    if (!env || !moduleBase_) {
-        appendLog("post write: EnvironmentSystem not captured yet");
+    if (!ready()) {
+        appendLog("post queue: EnvironmentSystem not captured yet");
         return false;
     }
 
-    auto setter = reinterpret_cast<FloatSetterFn>(moduleBase_ + FloatSetterRva);
-    setter(reinterpret_cast<void*>(env), id, value, lastFlags_.load(), lastExtra_.load());
+    pendingId_ = id;
+    pendingValueBits_ = std::bit_cast<std::uint32_t>(value);
+    pendingKind_ = 1;
 
     char line[160]{};
-    std::snprintf(line, sizeof(line), "post %s -> %g", label ? label : "float", value);
+    std::snprintf(line, sizeof(line), "post queued %s -> %g", label ? label : "float", value);
     appendLog(line);
     return true;
 }
 
 bool PostProcessSystem::setBool(std::uint16_t id, bool value, const char* label) noexcept {
-    const auto env = environmentSystem_.load();
-    if (!env || !moduleBase_) {
-        appendLog("post write: EnvironmentSystem not captured yet");
+    if (!ready()) {
+        appendLog("post queue: EnvironmentSystem not captured yet");
         return false;
     }
 
-    auto setter = reinterpret_cast<BoolSetterFn>(moduleBase_ + BoolSetterRva);
-    setter(reinterpret_cast<void*>(env), id, value, lastFlags_.load(), lastExtra_.load());
+    pendingId_ = id;
+    pendingValueBits_ = value ? 1u : 0u;
+    pendingKind_ = 2;
 
     char line[160]{};
-    std::snprintf(line, sizeof(line), "post %s -> %s",
+    std::snprintf(line, sizeof(line), "post queued %s -> %s",
         label ? label : "bool", value ? "ON" : "OFF");
     appendLog(line);
     return true;
+}
+
+void PostProcessSystem::processPending(void* environmentSystem) noexcept {
+    const int kind = pendingKind_.exchange(0);
+    if (!kind || !environmentSystem || !moduleBase_) return;
+
+    const auto id = pendingId_.load();
+    const auto bits = pendingValueBits_.load();
+
+    if (kind == 1) {
+        const float value = std::bit_cast<float>(bits);
+        auto setter = reinterpret_cast<FloatSetterFn>(moduleBase_ + FloatSetterRva);
+        setter(environmentSystem, id, value, lastFlags_.load(), lastExtra_.load());
+
+        char line[160]{};
+        std::snprintf(line, sizeof(line), "post native-thread float id=0x%X value=%g",
+            static_cast<unsigned>(id), value);
+        appendLog(line);
+    } else if (kind == 2) {
+        const bool value = bits != 0;
+        auto setter = reinterpret_cast<BoolSetterFn>(moduleBase_ + BoolSetterRva);
+        setter(environmentSystem, id, value, lastFlags_.load(), lastExtra_.load());
+
+        char line[160]{};
+        std::snprintf(line, sizeof(line), "post native-thread bool id=0x%X value=%s",
+            static_cast<unsigned>(id), value ? "ON" : "OFF");
+        appendLog(line);
+    }
 }
 
 bool PostProcessSystem::setExposure(float value) noexcept {
