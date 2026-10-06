@@ -62,17 +62,9 @@ bool ToolRuntime::start() {
     lights.bind(bindings.moduleBase);
     writeLine("bindings initialized");
 
-    // Early injection is supported: if Snowdrop has not finished constructing the
-    // Environment descriptor registry yet, retry a few times on this worker thread.
-    if (!bindings.environmentRegistryFound) {
-        for (int attempt = 1; attempt <= 3 && !bindings.environmentRegistryFound; ++attempt) {
-            char line[64]{};
-            std::snprintf(line, sizeof(line), "env registry retry %d/3", attempt);
-            writeLine(line);
-            Sleep(2000);
-            bindings.environmentRegistryFound = bindings.environmentRegistry.locate(bindings.moduleBase);
-        }
-    }
+    // Environment discovery is deliberately deferred. The previous full-process
+    // scan could stall bootstrap before any useful diagnostics were written.
+    writeLine("environment scan deferred");
 
     writeStartupDiagnostics(*this);
     return true;
