@@ -35,6 +35,7 @@ public:
     bool setBloom(float value) noexcept;
     bool setGlare(float value) noexcept;
     bool setFilmGrainAmount(float value) noexcept;
+    bool directSetFilmGrainAmount(float value) noexcept;
 
     bool setLensFlare(bool enabled) noexcept;
     bool setDepthOfField(bool enabled) noexcept;
@@ -72,6 +73,7 @@ private:
     void* lookupRuntimeValue(const char* envName) const noexcept;
     void logRuntimeBefore(const char* envName, bool isBool) noexcept;
     void logRuntimeAfter(void* environmentSystem) noexcept;
+    void logDirectRuntimeAfter() noexcept;
     std::uint32_t queueCountForCurrentThread(void* environmentSystem, std::uint32_t* slotOut = nullptr) noexcept;
     std::uint32_t queueCountForSlot(void* environmentSystem, std::uint32_t slot) noexcept;
     void logPreviousQueueDrain(void* environmentSystem) noexcept;
@@ -105,6 +107,7 @@ private:
     std::atomic_bool runtimeWatchActive_{};
     std::atomic_bool runtimeWatchIsBool_{};
     std::atomic<std::uint16_t> runtimeWatchId_{};
+    std::atomic_bool directRuntimeWatchActive_{};
 };
 
 }
