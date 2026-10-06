@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 
@@ -153,6 +154,37 @@ bool EnvironmentSystem::logRain() const noexcept {
         type,
         value,
         static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    appendLog(line);
+    return true;
+}
+
+bool EnvironmentSystem::logRainMetadata() const noexcept {
+    if (!moduleBase_) return false;
+
+    const auto descriptor = moduleBase_ + EnvRegistryOwnerRva
+        + static_cast<std::uintptr_t>(GameplayRainId) * 0x40u;
+
+    const auto defaultBits = *reinterpret_cast<const std::uint32_t*>(descriptor + 0x00);
+    float defaultValue{};
+    std::memcpy(&defaultValue, &defaultBits, sizeof(defaultValue));
+
+    const bool hasMin = *reinterpret_cast<const std::uint8_t*>(descriptor + 0x18) != 0;
+    const float minValue = *reinterpret_cast<const float*>(descriptor + 0x1C);
+    const bool hasMax = *reinterpret_cast<const std::uint8_t*>(descriptor + 0x20) != 0;
+    const float maxValue = *reinterpret_cast<const float*>(descriptor + 0x24);
+    const auto id = *reinterpret_cast<const std::uint16_t*>(descriptor + 0x34);
+    const auto name = *reinterpret_cast<const char* const*>(descriptor + 0x38);
+
+    char line[320]{};
+    std::snprintf(line, sizeof(line),
+        "WEATHER Rain descriptor id=0x%X name=%s default=%g min=%s%g max=%s%g",
+        static_cast<unsigned>(id),
+        name ? name : "<null>",
+        defaultValue,
+        hasMin ? "" : "<none>",
+        minValue,
+        hasMax ? "" : "<none>",
+        maxValue);
     appendLog(line);
     return true;
 }
