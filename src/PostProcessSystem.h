@@ -73,6 +73,7 @@ private:
     void logRuntimeBefore(const char* envName, bool isBool) noexcept;
     void logRuntimeAfter(void* environmentSystem) noexcept;
     std::uint32_t queueCountForCurrentThread(void* environmentSystem, std::uint32_t* slotOut = nullptr) noexcept;
+    std::uint32_t queueCountForSlot(void* environmentSystem, std::uint32_t slot) noexcept;
     void logPreviousQueueDrain(void* environmentSystem) noexcept;
     void appendLog(const char* text) const noexcept;
 
