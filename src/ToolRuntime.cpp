@@ -56,19 +56,19 @@ bool ToolRuntime::start() {
 
     writeLine("bindings initialized");
 
-    if (post.initialize(bindings.moduleBase)) {
-        writeLine("post hook initialized");
+    if (environment.initialize(bindings.moduleBase)) {
+        writeLine("environment initialized");
     } else {
-        writeLine("post hook initialization failed");
+        writeLine("environment initialization failed");
     }
 
-    writeStartupDiagnostics(*this);
+    writeLine("post disabled for Environment/Weather testing");
     return true;
 }
 
 void ToolRuntime::stop() {
     if (!m_running.exchange(false)) return;
-    post.shutdown();
+    environment.shutdown();
     bindings.shutdown();
 }
 }
