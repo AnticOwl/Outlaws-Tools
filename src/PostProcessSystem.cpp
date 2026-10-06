@@ -177,6 +177,7 @@ void PostProcessSystem::environmentUpdateDetour(void* environmentSystem) {
     // A command queued on the previous update has now had one native Snowdrop
     // Environment pass in which to be consumed. Read the active runtime value now.
     self->logRuntimeAfter(environmentSystem);
+    self->logDirectRuntimeAfter();
 
     self->processPending(environmentSystem);
 }
@@ -481,6 +482,58 @@ bool PostProcessSystem::setGlare(float value) noexcept {
 
 bool PostProcessSystem::setFilmGrainAmount(float value) noexcept {
     return setFloat(FilmGrainAmountId, value, "Env_FilmGrainAmount");
+}
+
+bool PostProcessSystem::directSetFilmGrainAmount(float value) noexcept {
+    auto* record = static_cast<std::uint8_t*>(lookupRuntimeValue("Env_FilmGrainAmount"));
+    if (!record) {
+        appendLog("post DIRECT Env_FilmGrainAmount = <record not found>");
+        return false;
+    }
+
+    auto* liveValue = reinterpret_cast<float*>(record + 0x10);
+    const float before = *liveValue;
+
+    DWORD oldProtect{};
+    if (!VirtualProtect(liveValue, sizeof(float), PAGE_READWRITE, &oldProtect)) {
+        appendLog("post DIRECT Env_FilmGrainAmount = <VirtualProtect failed>");
+        return false;
+    }
+
+    *liveValue = value;
+
+    DWORD ignored{};
+    VirtualProtect(liveValue, sizeof(float), oldProtect, &ignored);
+
+    const float immediate = *liveValue;
+    directRuntimeWatchActive_ = true;
+
+    char line[256]{};
+    std::snprintf(line, sizeof(line),
+        "post DIRECT Env_FilmGrainAmount record=0x%llX value %g -> %g immediate=%g",
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)),
+        before, value, immediate);
+    appendLog(line);
+    return true;
+}
+
+void PostProcessSystem::logDirectRuntimeAfter() noexcept {
+    if (!directRuntimeWatchActive_.exchange(false)) return;
+
+    const auto* record = static_cast<const std::uint8_t*>(
+        lookupRuntimeValue("Env_FilmGrainAmount"));
+    if (!record) {
+        appendLog("post DIRECT next-frame Env_FilmGrainAmount = <record not found>");
+        return;
+    }
+
+    const float value = *reinterpret_cast<const float*>(record + 0x10);
+    char line[224]{};
+    std::snprintf(line, sizeof(line),
+        "post DIRECT next-frame Env_FilmGrainAmount value=%g record=0x%llX",
+        value,
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    appendLog(line);
 }
 
 bool PostProcessSystem::setLensFlare(bool enabled) noexcept {
