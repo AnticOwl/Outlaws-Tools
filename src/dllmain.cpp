@@ -4,7 +4,18 @@
 
 namespace {
 DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
-    outlaws::ToolRuntime::instance().start();
+    auto& runtime = outlaws::ToolRuntime::instance();
+    if (!runtime.start()) return 0;
+
+    while (runtime.running()) {
+        if (GetAsyncKeyState(VK_F8) & 1) {
+            runtime.post.setExposure(1.0f);
+        }
+        if (GetAsyncKeyState(VK_F9) & 1) {
+            runtime.post.restoreExposure();
+        }
+        Sleep(50);
+    }
     return 0;
 }
 }
@@ -12,9 +23,6 @@ DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(module);
-
-        // Start outside the loader-lock path. For normal testing, injection is enough:
-        // no manual call to OutlawsTools_Start() is required.
         if (HANDLE thread = CreateThread(nullptr, 0, OutlawsTools_Bootstrap, nullptr, 0, nullptr)) {
             CloseHandle(thread);
         }
@@ -33,22 +41,21 @@ extern "C" __declspec(dllexport) void OutlawsTools_Stop() {
 }
 
 extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetEnvRegistryOwner() {
-    const auto& bindings = outlaws::ToolRuntime::instance().bindings;
-    return bindings.environmentRegistryFound ? bindings.environmentRegistry.descriptorOwner() : 0;
+    return 0;
 }
 
 extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetPointLightType() {
-    return outlaws::ToolRuntime::instance().lights.pointTypeDescriptor();
+    return 0;
 }
 
 extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetSpotLightType() {
-    return outlaws::ToolRuntime::instance().lights.spotTypeDescriptor();
+    return 0;
 }
 
 extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetTubeLightType() {
-    return outlaws::ToolRuntime::instance().lights.tubeTypeDescriptor();
+    return 0;
 }
 
 extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetAreaLightType() {
-    return outlaws::ToolRuntime::instance().lights.areaTypeDescriptor();
+    return 0;
 }
