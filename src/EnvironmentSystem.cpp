@@ -36,6 +36,13 @@ void EnvironmentSystem::appendLog(const char* text) const noexcept {
     log.flush();
 }
 
+void* EnvironmentSystem::lookupRuntimeValue(const char* name) const noexcept {
+    if (!moduleBase_ || !name || !*name) return nullptr;
+    using RuntimeLookupFn = void*(*)(const char*);
+    auto lookup = reinterpret_cast<RuntimeLookupFn>(moduleBase_ + RuntimeLookupRva);
+    return lookup(name);
+}
+
 void* EnvironmentSystem::resolveTimeOfDaySystem() const noexcept {
     if (!moduleBase_) return nullptr;
 
@@ -127,6 +134,49 @@ bool EnvironmentSystem::setTimePaused(bool paused) noexcept {
         before ? "ON" : "OFF", after ? "ON" : "OFF");
     appendLog(line);
     return after == paused;
+}
+
+bool EnvironmentSystem::logRain() const noexcept {
+    const auto* record = static_cast<const std::uint8_t*>(
+        lookupRuntimeValue("Env_GameplayRainAmount"));
+    if (!record) {
+        appendLog("WEATHER Rain Env_GameplayRainAmount = <not found>");
+        return false;
+    }
+
+    const auto type = *reinterpret_cast<const std::uint32_t*>(record + 0x00);
+    const float value = *reinterpret_cast<const float*>(record + 0x10);
+
+    char line[224]{};
+    std::snprintf(line, sizeof(line),
+        "WEATHER Rain runtime type=%u value=%g record=0x%llX",
+        type,
+        value,
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    appendLog(line);
+    return true;
+}
+
+bool EnvironmentSystem::setRain(float value) noexcept {
+    auto* record = static_cast<std::uint8_t*>(
+        lookupRuntimeValue("Env_GameplayRainAmount"));
+    if (!record) {
+        appendLog("WEATHER Rain DIRECT = <not found>");
+        return false;
+    }
+
+    auto* liveValue = reinterpret_cast<float*>(record + 0x10);
+    const float before = *liveValue;
+    *liveValue = value;
+    const float immediate = *liveValue;
+
+    char line[256]{};
+    std::snprintf(line, sizeof(line),
+        "WEATHER Rain DIRECT record=0x%llX value %g -> %g immediate=%g",
+        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)),
+        before, value, immediate);
+    appendLog(line);
+    return immediate == value;
 }
 
 bool EnvironmentSystem::read(EnvironmentState& out) const {
