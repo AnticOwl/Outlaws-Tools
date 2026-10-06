@@ -1,6 +1,5 @@
 #include "GameBindings.h"
 #include <Windows.h>
-#include <cstdio>
 
 namespace outlaws {
 bool GameBindings::initialize() {
@@ -10,16 +9,11 @@ bool GameBindings::initialize() {
         return false;
     }
 
-    environmentRegistryFound = environmentRegistry.locate(moduleBase);
-
-    char buffer[192]{};
-    if (environmentRegistryFound) {
-        std::snprintf(buffer, sizeof(buffer), "[OutlawsTools] Env registry owner = 0x%llX\n",
-            static_cast<unsigned long long>(environmentRegistry.descriptorOwner()));
-    } else {
-        std::snprintf(buffer, sizeof(buffer), "[OutlawsTools] Env registry owner not found yet.\n");
-    }
-    OutputDebugStringA(buffer);
+    // Do NOT scan the entire process for the Environment registry during bootstrap.
+    // That scan can stall for a long time in Outlaws. We first bring up the runtime
+    // and light diagnostics; Environment discovery will be triggered separately.
+    environmentRegistryFound = false;
+    environmentRegistry.setDescriptorOwner(0);
 
     initialized = true;
     return true;
