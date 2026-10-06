@@ -434,6 +434,12 @@ std::uint32_t PostProcessSystem::queueCountForCurrentThread(
     if (slot < 0 || slot >= 0x1000) return 0;
 
     if (slotOut) *slotOut = static_cast<std::uint32_t>(slot);
+    return queueCountForSlot(environmentSystem, static_cast<std::uint32_t>(slot));
+}
+
+std::uint32_t PostProcessSystem::queueCountForSlot(
+    void* environmentSystem, std::uint32_t slot) noexcept {
+    if (!environmentSystem || slot >= 0x1000) return 0;
 
     const auto lane = reinterpret_cast<const std::uint8_t*>(environmentSystem)
         + static_cast<std::size_t>(slot) * 0x10u;
@@ -444,16 +450,18 @@ std::uint32_t PostProcessSystem::queueCountForCurrentThread(
 void PostProcessSystem::logPreviousQueueDrain(void* environmentSystem) noexcept {
     if (!queueWatchActive_.exchange(false)) return;
 
-    std::uint32_t slot = 0;
-    const auto current = queueCountForCurrentThread(environmentSystem, &slot);
     const auto expectedSlot = queueWatchSlot_.load();
+    const auto current = queueCountForSlot(environmentSystem, expectedSlot);
+
+    std::uint32_t currentThreadSlot = 0;
+    (void)queueCountForCurrentThread(environmentSystem, &currentThreadSlot);
 
     char line[224]{};
     std::snprintf(line, sizeof(line),
-        "post queue next-frame id=0x%X expectedSlot=%u currentSlot=%u count=%u (afterWrite=%u)",
+        "post queue next-frame id=0x%X originalSlot=%u currentThreadSlot=%u count=%u (afterWrite=%u)",
         static_cast<unsigned>(queueWatchId_.load()),
         expectedSlot,
-        slot,
+        currentThreadSlot,
         current,
         queueWatchAfter_.load());
     appendLog(line);
