@@ -18,21 +18,8 @@ DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
     while (runtime.running()) {
         const bool ctrl = ctrlDown();
 
-        // Remote-friendly Post diagnostics: no function-key modifiers required.
-        if (pressed(VK_HOME))     runtime.post.setCameraLensOptics(true);
-        if (pressed(VK_END))      runtime.post.setCameraLensOptics(false);
-
-        if (pressed(VK_INSERT))   runtime.post.setGlareEnabled(true);
-        if (pressed(VK_DELETE))   runtime.post.setGlareEnabled(false);
-
-        if (pressed(VK_PRIOR))    runtime.post.setLensGlare(true);   // PageUp
-        if (pressed(VK_NEXT))     runtime.post.setLensGlare(false);  // PageDown
-
-        if (pressed(VK_PAUSE))    runtime.post.setLensVeilingGlare(true);
-        if (pressed(VK_SCROLL))   runtime.post.setLensVeilingGlare(false);
-
-        if (pressed(VK_ADD))      runtime.post.setGlare(10.0f);
-        if (pressed(VK_SUBTRACT)) runtime.post.setGlare(0.0f);
+        if (pressed(VK_NEXT))  runtime.post.directSetFilmGrainAmount(0.0f);  // PageDown
+        if (pressed(VK_PRIOR)) runtime.post.directSetFilmGrainAmount(10.0f); // PageUp
 
         if (!ctrl) {
             if (pressed(VK_F1))  runtime.post.setExposure(0.0f);
