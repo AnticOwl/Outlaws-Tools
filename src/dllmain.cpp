@@ -17,12 +17,11 @@ DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
 
     while (runtime.running()) {
         const bool ctrl = ctrlDown();
-        const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-        if (shift) {
-            if (pressed(VK_F7)) runtime.post.directSetFilmGrainAmount(0.0f);
-            if (pressed(VK_F8)) runtime.post.directSetFilmGrainAmount(10.0f);
-        } else if (!ctrl) {
+        if (pressed(VK_NEXT))  runtime.post.directSetFilmGrainAmount(0.0f);  // PageDown
+        if (pressed(VK_PRIOR)) runtime.post.directSetFilmGrainAmount(10.0f); // PageUp
+
+        if (!ctrl) {
             if (pressed(VK_F1))  runtime.post.setExposure(0.0f);
             if (pressed(VK_F2))  runtime.post.setExposure(10.0f);
 
