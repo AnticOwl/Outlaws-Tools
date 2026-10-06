@@ -64,6 +64,7 @@ private:
 
     bool setFloat(std::uint16_t id, float value, const char* label) noexcept;
     bool setBool(std::uint16_t id, bool value, const char* label) noexcept;
+    void processPending(void* environmentSystem) noexcept;
     void appendLog(const char* text) const noexcept;
 
     std::uintptr_t moduleBase_{};
@@ -79,6 +80,12 @@ private:
     std::atomic<std::uintptr_t> environmentSystem_{};
     std::atomic<std::uint32_t> lastFlags_{};
     std::atomic<std::uint32_t> lastExtra_{};
+
+    // Writes are queued by the hotkey thread and executed from the native
+    // Environment update thread so Snowdrop uses the correct internal queue/TLS.
+    std::atomic<int> pendingKind_{}; // 0=none, 1=float, 2=bool
+    std::atomic<std::uint16_t> pendingId_{};
+    std::atomic<std::uint32_t> pendingValueBits_{};
 };
 
 }
