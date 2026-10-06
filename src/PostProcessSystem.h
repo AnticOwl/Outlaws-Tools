@@ -103,7 +103,7 @@ private:
     std::atomic<std::uint16_t> queueWatchId_{};
     std::atomic_bool runtimeWatchActive_{};
     std::atomic_bool runtimeWatchIsBool_{};
-    char runtimeWatchName_[96]{};
+    std::atomic<std::uint16_t> runtimeWatchId_{};
 };
 
 }
