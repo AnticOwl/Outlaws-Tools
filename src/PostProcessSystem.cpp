@@ -174,6 +174,10 @@ void PostProcessSystem::environmentUpdateDetour(void* environmentSystem) {
     auto original = reinterpret_cast<EnvironmentUpdateFn>(self->environmentUpdateTrampoline_);
     if (original) original(environmentSystem);
 
+    // A command queued on the previous update has now had one native Snowdrop
+    // Environment pass in which to be consumed. Read the active runtime value now.
+    self->logRuntimeAfter(environmentSystem);
+
     self->processPending(environmentSystem);
 }
 
@@ -223,6 +227,7 @@ bool PostProcessSystem::setFloat(std::uint16_t id, float value, const char* labe
     }
 
     logDescriptorDefault(id, false, label);
+    logRuntimeBefore(label, false);
 
     pendingId_ = id;
     pendingValueBits_ = std::bit_cast<std::uint32_t>(value);
@@ -241,6 +246,7 @@ bool PostProcessSystem::setBool(std::uint16_t id, bool value, const char* label)
     }
 
     logDescriptorDefault(id, true, label);
+    logRuntimeBefore(label, true);
 
     pendingId_ = id;
     pendingValueBits_ = value ? 1u : 0u;
@@ -292,6 +298,9 @@ void PostProcessSystem::processPending(void* environmentSystem) noexcept {
     queueWatchAfter_ = after;
     queueWatchId_ = id;
     queueWatchActive_ = true;
+    runtimeWatchId_ = id;
+    runtimeWatchIsBool_ = (kind == 2);
+    runtimeWatchActive_ = true;
 
     char line[192]{};
     std::snprintf(line, sizeof(line),
@@ -304,7 +313,7 @@ void PostProcessSystem::logDescriptorDefault(std::uint16_t id, bool isBool, cons
     if (!moduleBase_ || id >= 0x1E8) return;
 
     const auto descriptor = moduleBase_ + EnvRegistryOwnerRva
-        + static_cast<std::uintptr_t>(id) * 0x40u - 0x30u;
+        + static_cast<std::uintptr_t>(id) * 0x40u;
 
     if (isBool) {
         const bool value = *reinterpret_cast<const std::uint8_t*>(descriptor) != 0;
@@ -322,6 +331,97 @@ void PostProcessSystem::logDescriptorDefault(std::uint16_t id, bool isBool, cons
             label ? label : "float", static_cast<unsigned>(id), value);
         appendLog(line);
     }
+}
+
+
+void* PostProcessSystem::lookupRuntimeValue(const char* envName) const noexcept {
+    if (!moduleBase_ || !envName || !*envName) return nullptr;
+    using RuntimeLookupFn = void*(*)(const char*);
+    auto lookup = reinterpret_cast<RuntimeLookupFn>(moduleBase_ + RuntimeLookupRva);
+    return lookup(envName);
+}
+
+void PostProcessSystem::logRuntimeBefore(const char* envName, bool isBool) noexcept {
+    const auto* record = static_cast<const std::uint8_t*>(lookupRuntimeValue(envName));
+    if (!record) {
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "post runtime BEFORE %s = <not found>",
+            envName ? envName : "<null>");
+        appendLog(line);
+        return;
+    }
+
+    const auto type = *reinterpret_cast<const std::uint32_t*>(record + 0x00);
+    char line[224]{};
+    if (isBool) {
+        const bool value = *(record + 0x10) != 0;
+        std::snprintf(line, sizeof(line),
+            "post runtime BEFORE %s type=%u value=%s record=0x%llX",
+            envName, type, value ? "ON" : "OFF",
+            static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    } else {
+        const float value = *reinterpret_cast<const float*>(record + 0x10);
+        std::snprintf(line, sizeof(line),
+            "post runtime BEFORE %s type=%u value=%g record=0x%llX",
+            envName, type, value,
+            static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    }
+    appendLog(line);
+}
+
+void PostProcessSystem::logRuntimeAfter(void*) noexcept {
+    if (!runtimeWatchActive_.exchange(false)) return;
+
+    const auto id = runtimeWatchId_.load();
+    const char* envName = nullptr;
+    switch (id) {
+    case BloomStrengthId:           envName = "Env_BloomStrength2"; break;
+    case GlareStrengthId:           envName = "Env_GlareStrength"; break;
+    case ExposureTargetId:          envName = "Env_ExposureTarget2"; break;
+    case FilmGrainAmountId:         envName = "Env_FilmGrainAmount"; break;
+    case LensFlareEnabledId:        envName = "Env_LensFlareEnabled"; break;
+    case DepthOfFieldEnabledId:     envName = "Env_DepthOfFieldEnabled"; break;
+    case FilmGrainEnabledId:        envName = "Env_FilmGrainEnabled"; break;
+    case LensVeilingGlareEnabledId: envName = "Env_LensVeilingGlareEnabled"; break;
+    case LensGlareEnabledId:        envName = "Env_LensGlareEnabled"; break;
+    case GlareEnabledId:            envName = "Env_GlareEnabled"; break;
+    case CameraLensOpticsEnabledId: envName = "Env_CameraLensOpticsEnabled"; break;
+    default: break;
+    }
+
+    if (!envName) {
+        char line[128]{};
+        std::snprintf(line, sizeof(line),
+            "post runtime AFTER id=0x%X = <unknown name>",
+            static_cast<unsigned>(id));
+        appendLog(line);
+        return;
+    }
+
+    const auto* record = static_cast<const std::uint8_t*>(lookupRuntimeValue(envName));
+    if (!record) {
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "post runtime AFTER %s = <not found>", envName);
+        appendLog(line);
+        return;
+    }
+
+    const auto type = *reinterpret_cast<const std::uint32_t*>(record + 0x00);
+    char line[224]{};
+    if (runtimeWatchIsBool_.load()) {
+        const bool value = *(record + 0x10) != 0;
+        std::snprintf(line, sizeof(line),
+            "post runtime AFTER %s type=%u value=%s record=0x%llX",
+            envName, type, value ? "ON" : "OFF",
+            static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    } else {
+        const float value = *reinterpret_cast<const float*>(record + 0x10);
+        std::snprintf(line, sizeof(line),
+            "post runtime AFTER %s type=%u value=%g record=0x%llX",
+            envName, type, value,
+            static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
+    }
+    appendLog(line);
 }
 
 std::uint32_t PostProcessSystem::queueCountForCurrentThread(
@@ -360,47 +460,47 @@ void PostProcessSystem::logPreviousQueueDrain(void* environmentSystem) noexcept 
 }
 
 bool PostProcessSystem::setExposure(float value) noexcept {
-    return setFloat(ExposureTargetId, value, "ExposureTarget2");
+    return setFloat(ExposureTargetId, value, "Env_ExposureTarget2");
 }
 
 bool PostProcessSystem::setBloom(float value) noexcept {
-    return setFloat(BloomStrengthId, value, "BloomStrength2");
+    return setFloat(BloomStrengthId, value, "Env_BloomStrength2");
 }
 
 bool PostProcessSystem::setGlare(float value) noexcept {
-    return setFloat(GlareStrengthId, value, "GlareStrength");
+    return setFloat(GlareStrengthId, value, "Env_GlareStrength");
 }
 
 bool PostProcessSystem::setFilmGrainAmount(float value) noexcept {
-    return setFloat(FilmGrainAmountId, value, "FilmGrainAmount");
+    return setFloat(FilmGrainAmountId, value, "Env_FilmGrainAmount");
 }
 
 bool PostProcessSystem::setLensFlare(bool enabled) noexcept {
-    return setBool(LensFlareEnabledId, enabled, "LensFlareEnabled");
+    return setBool(LensFlareEnabledId, enabled, "Env_LensFlareEnabled");
 }
 
 bool PostProcessSystem::setDepthOfField(bool enabled) noexcept {
-    return setBool(DepthOfFieldEnabledId, enabled, "DepthOfFieldEnabled");
+    return setBool(DepthOfFieldEnabledId, enabled, "Env_DepthOfFieldEnabled");
 }
 
 bool PostProcessSystem::setFilmGrain(bool enabled) noexcept {
-    return setBool(FilmGrainEnabledId, enabled, "FilmGrainEnabled");
+    return setBool(FilmGrainEnabledId, enabled, "Env_FilmGrainEnabled");
 }
 
 bool PostProcessSystem::setLensGlare(bool enabled) noexcept {
-    return setBool(LensGlareEnabledId, enabled, "LensGlareEnabled");
+    return setBool(LensGlareEnabledId, enabled, "Env_LensGlareEnabled");
 }
 
 bool PostProcessSystem::setLensVeilingGlare(bool enabled) noexcept {
-    return setBool(LensVeilingGlareEnabledId, enabled, "LensVeilingGlareEnabled");
+    return setBool(LensVeilingGlareEnabledId, enabled, "Env_LensVeilingGlareEnabled");
 }
 
 bool PostProcessSystem::setGlareEnabled(bool enabled) noexcept {
-    return setBool(GlareEnabledId, enabled, "GlareEnabled");
+    return setBool(GlareEnabledId, enabled, "Env_GlareEnabled");
 }
 
 bool PostProcessSystem::setCameraLensOptics(bool enabled) noexcept {
-    return setBool(CameraLensOpticsEnabledId, enabled, "CameraLensOpticsEnabled");
+    return setBool(CameraLensOpticsEnabledId, enabled, "Env_CameraLensOpticsEnabled");
 }
 
 bool PostProcessSystem::applyTestPresetOff() noexcept {
