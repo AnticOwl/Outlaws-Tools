@@ -9,6 +9,7 @@ public:
     static constexpr std::uintptr_t EnvRegistryOwnerRva  = 0x9658C70;
     static constexpr std::uintptr_t EnvironmentUpdateRva = 0x17B9CA0;
     static constexpr std::uintptr_t ThreadSlotRva        = 0x0CD6BE0;
+    static constexpr std::uintptr_t RuntimeLookupRva     = 0x17664B0;
     static constexpr std::uintptr_t FloatSetterRva       = 0x17D9C20;
     static constexpr std::uintptr_t BoolSetterRva        = 0x17D9CF0;
 
@@ -68,6 +69,9 @@ private:
     bool setBool(std::uint16_t id, bool value, const char* label) noexcept;
     void processPending(void* environmentSystem) noexcept;
     void logDescriptorDefault(std::uint16_t id, bool isBool, const char* label) noexcept;
+    void* lookupRuntimeValue(const char* envName) const noexcept;
+    void logRuntimeBefore(const char* envName, bool isBool) noexcept;
+    void logRuntimeAfter(void* environmentSystem) noexcept;
     std::uint32_t queueCountForCurrentThread(void* environmentSystem, std::uint32_t* slotOut = nullptr) noexcept;
     void logPreviousQueueDrain(void* environmentSystem) noexcept;
     void appendLog(const char* text) const noexcept;
@@ -97,6 +101,9 @@ private:
     std::atomic<std::uint32_t> queueWatchBefore_{};
     std::atomic<std::uint32_t> queueWatchAfter_{};
     std::atomic<std::uint16_t> queueWatchId_{};
+    std::atomic_bool runtimeWatchActive_{};
+    std::atomic_bool runtimeWatchIsBool_{};
+    char runtimeWatchName_[96]{};
 };
 
 }
