@@ -20,11 +20,73 @@ std::filesystem::path logPath() {
 }
 
 void writeAbsoluteJump(unsigned char* at, const void* destination) {
-    // FF 25 00 00 00 00 ; [absolute 64-bit target]
     at[0] = 0xFF;
     at[1] = 0x25;
     *reinterpret_cast<std::uint32_t*>(at + 2) = 0;
     *reinterpret_cast<std::uintptr_t*>(at + 6) = reinterpret_cast<std::uintptr_t>(destination);
+}
+
+bool patchHook(std::uintptr_t targetAddress,
+               const void* detour,
+               unsigned char* originalBytes,
+               std::size_t stolenLength,
+               void*& trampolineOut) {
+    auto* target = reinterpret_cast<unsigned char*>(targetAddress);
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(target, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) {
+        return false;
+    }
+
+    std::memcpy(originalBytes, target, stolenLength);
+
+    const std::size_t trampolineSize = stolenLength + 14;
+    auto* trampoline = static_cast<unsigned char*>(
+        VirtualAlloc(nullptr, trampolineSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (!trampoline) return false;
+
+    std::memcpy(trampoline, originalBytes, stolenLength);
+    writeAbsoluteJump(trampoline + stolenLength, target + stolenLength);
+
+    DWORD oldProtect{};
+    if (!VirtualProtect(target, stolenLength, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        VirtualFree(trampoline, 0, MEM_RELEASE);
+        return false;
+    }
+
+    unsigned char patch[32]{};
+    writeAbsoluteJump(patch, detour);
+    for (std::size_t i = 14; i < stolenLength; ++i) patch[i] = 0x90;
+
+    std::memcpy(target, patch, stolenLength);
+    FlushInstructionCache(GetCurrentProcess(), target, stolenLength);
+
+    DWORD ignored{};
+    VirtualProtect(target, stolenLength, oldProtect, &ignored);
+
+    trampolineOut = trampoline;
+    return true;
+}
+
+void unpatchHook(std::uintptr_t targetAddress,
+                 const unsigned char* originalBytes,
+                 std::size_t stolenLength,
+                 void*& trampoline) {
+    if (targetAddress) {
+        auto* target = reinterpret_cast<unsigned char*>(targetAddress);
+        DWORD oldProtect{};
+        if (VirtualProtect(target, stolenLength, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+            std::memcpy(target, originalBytes, stolenLength);
+            FlushInstructionCache(GetCurrentProcess(), target, stolenLength);
+            DWORD ignored{};
+            VirtualProtect(target, stolenLength, oldProtect, &ignored);
+        }
+    }
+
+    if (trampoline) {
+        VirtualFree(trampoline, 0, MEM_RELEASE);
+        trampoline = nullptr;
+    }
 }
 }
 
@@ -38,11 +100,19 @@ bool PostProcessSystem::initialize(std::uintptr_t moduleBase) noexcept {
 
     if (!moduleBase_) return false;
     g_postProcess = this;
-    return installFloatSetterHook();
+
+    const bool updateHook = installEnvironmentUpdateHook();
+    const bool setterHook = installFloatSetterHook();
+
+    if (!updateHook) appendLog("post hook: Environment update hook failed");
+    if (!setterHook) appendLog("post hook: float setter hook failed");
+
+    return updateHook && setterHook;
 }
 
 void PostProcessSystem::shutdown() noexcept {
     removeFloatSetterHook();
+    removeEnvironmentUpdateHook();
     g_postProcess = nullptr;
     moduleBase_ = 0;
     environmentSystem_ = 0;
@@ -58,70 +128,61 @@ void PostProcessSystem::appendLog(const char* text) const noexcept {
     std::ofstream log(logPath(), std::ios::out | std::ios::app);
     if (!log) return;
     log << text << "\n";
+    log.flush();
+}
+
+bool PostProcessSystem::installEnvironmentUpdateHook() noexcept {
+    environmentUpdateTarget_ = moduleBase_ + EnvironmentUpdateRva;
+    if (!patchHook(environmentUpdateTarget_,
+                   reinterpret_cast<const void*>(&PostProcessSystem::environmentUpdateDetour),
+                   environmentUpdateOriginalBytes_,
+                   sizeof(environmentUpdateOriginalBytes_),
+                   environmentUpdateTrampoline_)) {
+        return false;
+    }
+
+    appendLog("post hook: Environment update installed");
+    return true;
+}
+
+void PostProcessSystem::removeEnvironmentUpdateHook() noexcept {
+    unpatchHook(environmentUpdateTarget_,
+                environmentUpdateOriginalBytes_,
+                sizeof(environmentUpdateOriginalBytes_),
+                environmentUpdateTrampoline_);
+    environmentUpdateTarget_ = 0;
 }
 
 bool PostProcessSystem::installFloatSetterHook() noexcept {
     floatSetterTarget_ = moduleBase_ + FloatSetterRva;
-    auto* target = reinterpret_cast<unsigned char*>(floatSetterTarget_);
-
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!VirtualQuery(target, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) {
-        appendLog("post hook: target not committed");
+    if (!patchHook(floatSetterTarget_,
+                   reinterpret_cast<const void*>(&PostProcessSystem::floatSetterDetour),
+                   floatSetterOriginalBytes_,
+                   sizeof(floatSetterOriginalBytes_),
+                   floatSetterTrampoline_)) {
         return false;
     }
-
-    std::memcpy(originalBytes_, target, sizeof(originalBytes_));
-
-    constexpr std::size_t trampolineSize = 15 + 14;
-    auto* trampoline = static_cast<unsigned char*>(
-        VirtualAlloc(nullptr, trampolineSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
-    if (!trampoline) {
-        appendLog("post hook: trampoline allocation failed");
-        return false;
-    }
-
-    std::memcpy(trampoline, originalBytes_, 15);
-    writeAbsoluteJump(trampoline + 15, target + 15);
-    trampoline_ = trampoline;
-
-    DWORD oldProtect{};
-    if (!VirtualProtect(target, 15, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-        VirtualFree(trampoline_, 0, MEM_RELEASE);
-        trampoline_ = nullptr;
-        appendLog("post hook: VirtualProtect failed");
-        return false;
-    }
-
-    unsigned char patch[15]{};
-    writeAbsoluteJump(patch, reinterpret_cast<const void*>(&PostProcessSystem::floatSetterDetour));
-    patch[14] = 0x90;
-    std::memcpy(target, patch, sizeof(patch));
-    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
-
-    DWORD ignored{};
-    VirtualProtect(target, 15, oldProtect, &ignored);
 
     appendLog("post hook: float setter installed");
     return true;
 }
 
 void PostProcessSystem::removeFloatSetterHook() noexcept {
-    if (floatSetterTarget_) {
-        auto* target = reinterpret_cast<unsigned char*>(floatSetterTarget_);
-        DWORD oldProtect{};
-        if (VirtualProtect(target, 15, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            std::memcpy(target, originalBytes_, sizeof(originalBytes_));
-            FlushInstructionCache(GetCurrentProcess(), target, sizeof(originalBytes_));
-            DWORD ignored{};
-            VirtualProtect(target, 15, oldProtect, &ignored);
-        }
-    }
-
-    if (trampoline_) {
-        VirtualFree(trampoline_, 0, MEM_RELEASE);
-        trampoline_ = nullptr;
-    }
+    unpatchHook(floatSetterTarget_,
+                floatSetterOriginalBytes_,
+                sizeof(floatSetterOriginalBytes_),
+                floatSetterTrampoline_);
     floatSetterTarget_ = 0;
+}
+
+void PostProcessSystem::environmentUpdateDetour(void* environmentSystem) {
+    auto* self = g_postProcess;
+    if (!self) return;
+
+    self->onEnvironmentUpdate(environmentSystem);
+
+    auto original = reinterpret_cast<EnvironmentUpdateFn>(self->environmentUpdateTrampoline_);
+    if (original) original(environmentSystem);
 }
 
 void PostProcessSystem::floatSetterDetour(void* environmentSystem, std::uint16_t id, float value,
@@ -131,9 +192,22 @@ void PostProcessSystem::floatSetterDetour(void* environmentSystem, std::uint16_t
 
     self->onFloatSetter(environmentSystem, id, value, flags, extra);
 
-    auto original = reinterpret_cast<FloatSetterFn>(self->trampoline_);
+    auto original = reinterpret_cast<FloatSetterFn>(self->floatSetterTrampoline_);
     if (original) {
         original(environmentSystem, id, value, flags, extra);
+    }
+}
+
+void PostProcessSystem::onEnvironmentUpdate(void* environmentSystem) noexcept {
+    const auto ptr = reinterpret_cast<std::uintptr_t>(environmentSystem);
+    if (!ptr) return;
+
+    std::uintptr_t expected = 0;
+    if (environmentSystem_.compare_exchange_strong(expected, ptr)) {
+        char line[128]{};
+        std::snprintf(line, sizeof(line), "post EnvironmentSystem=0x%llX",
+            static_cast<unsigned long long>(ptr));
+        appendLog(line);
     }
 }
 
@@ -164,14 +238,15 @@ void PostProcessSystem::onFloatSetter(void* environmentSystem, std::uint16_t id,
 
 bool PostProcessSystem::setExposure(float value) noexcept {
     const auto env = environmentSystem_.load();
-    auto original = reinterpret_cast<FloatSetterFn>(trampoline_);
-    if (!env || !original) {
+    if (!env || !moduleBase_) {
         appendLog("post F8: EnvironmentSystem not captured yet");
         return false;
     }
 
+    auto setter = reinterpret_cast<FloatSetterFn>(moduleBase_ + FloatSetterRva);
+
     injectedWrite_ = true;
-    original(reinterpret_cast<void*>(env), ExposureTargetId, value, lastFlags_.load(), lastExtra_.load());
+    setter(reinterpret_cast<void*>(env), ExposureTargetId, value, lastFlags_.load(), lastExtra_.load());
     injectedWrite_ = false;
 
     char line[128]{};
