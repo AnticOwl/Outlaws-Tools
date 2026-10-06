@@ -9,10 +9,10 @@ DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
 
     while (runtime.running()) {
         if (GetAsyncKeyState(VK_F8) & 1) {
-            runtime.post.setExposure(1.0f);
+            runtime.post.applyTestPresetOff();
         }
         if (GetAsyncKeyState(VK_F9) & 1) {
-            runtime.post.restoreExposure();
+            runtime.post.applyTestPresetOn();
         }
         Sleep(50);
     }
@@ -38,24 +38,4 @@ extern "C" __declspec(dllexport) bool OutlawsTools_Start() {
 
 extern "C" __declspec(dllexport) void OutlawsTools_Stop() {
     outlaws::ToolRuntime::instance().stop();
-}
-
-extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetEnvRegistryOwner() {
-    return 0;
-}
-
-extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetPointLightType() {
-    return 0;
-}
-
-extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetSpotLightType() {
-    return 0;
-}
-
-extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetTubeLightType() {
-    return 0;
-}
-
-extern "C" __declspec(dllexport) std::uintptr_t OutlawsTools_GetAreaLightType() {
-    return 0;
 }
