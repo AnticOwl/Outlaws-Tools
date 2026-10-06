@@ -21,6 +21,7 @@ class PostProcessSystem {
 public:
     static constexpr std::uintptr_t EnvRegistryOwnerRva = 0x9658C70;
     static constexpr std::uintptr_t EnvDescriptorLookupRva = 0x177A410;
+    static constexpr std::uintptr_t EnvironmentUpdateRva = 0x17B9CA0;
     static constexpr std::uintptr_t FloatSetterRva = 0x17D9C20;
 
     static constexpr std::uint16_t ExposureTargetId = 0x52;
@@ -40,21 +41,32 @@ public:
     bool apply(const PostProcessState& state);
 
 private:
+    using EnvironmentUpdateFn = void(*)(void*);
     using FloatSetterFn = void(*)(void*, std::uint16_t, float, std::uint32_t, std::uint32_t);
 
+    static void environmentUpdateDetour(void* environmentSystem);
     static void floatSetterDetour(void* environmentSystem, std::uint16_t id, float value,
                                   std::uint32_t flags, std::uint32_t extra);
+
+    void onEnvironmentUpdate(void* environmentSystem) noexcept;
     void onFloatSetter(void* environmentSystem, std::uint16_t id, float value,
                        std::uint32_t flags, std::uint32_t extra) noexcept;
 
+    bool installEnvironmentUpdateHook() noexcept;
+    void removeEnvironmentUpdateHook() noexcept;
     bool installFloatSetterHook() noexcept;
     void removeFloatSetterHook() noexcept;
     void appendLog(const char* text) const noexcept;
 
     std::uintptr_t moduleBase_{};
+
+    std::uintptr_t environmentUpdateTarget_{};
+    void* environmentUpdateTrampoline_{};
+    unsigned char environmentUpdateOriginalBytes_[16]{};
+
     std::uintptr_t floatSetterTarget_{};
-    void* trampoline_{};
-    unsigned char originalBytes_[15]{};
+    void* floatSetterTrampoline_{};
+    unsigned char floatSetterOriginalBytes_[15]{};
 
     std::atomic<std::uintptr_t> environmentSystem_{};
     std::atomic<std::uint32_t> lastFlags_{};
