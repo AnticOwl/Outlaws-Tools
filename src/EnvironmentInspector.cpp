@@ -2,6 +2,8 @@
 #include "EnvironmentSystem.h"
 
 #include <cstdio>
+#include <cwchar>
+#include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -203,8 +205,12 @@ LRESULT CALLBACK EnvironmentInspector::wndProc(HWND hwnd, UINT msg, WPARAM wPara
 
     case WM_CLOSE:
         if (self) {
-            self->visible_ = false;
-            ShowWindow(hwnd, SW_HIDE);
+            if (!self->running_.load()) {
+                DestroyWindow(hwnd);
+            } else {
+                self->visible_ = false;
+                ShowWindow(hwnd, SW_HIDE);
+            }
             return 0;
         }
         break;
