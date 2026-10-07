@@ -58,6 +58,15 @@ private:
     bool cloudCoverageField_{};
     bool windDirectionField_{};
     bool windStrengthField_{};
+    float gameplayRain_{};
+    float graphicsRain_{};
+    float temperature_{};
+    float viewDistance_{};
+    float outdoorFog_{};
+    float cloudCoverage_{};
+    float windDirection_{};
+    float windStrength_{};
+
     bool hasSnow_{};
     bool hasFog_{};
 
@@ -74,6 +83,15 @@ private:
     bool lastCloudCoverageField_{};
     bool lastWindDirectionField_{};
     bool lastWindStrengthField_{};
+    float lastGameplayRain_{};
+    float lastGraphicsRain_{};
+    float lastTemperature_{};
+    float lastViewDistance_{};
+    float lastOutdoorFog_{};
+    float lastCloudCoverage_{};
+    float lastWindDirection_{};
+    float lastWindStrength_{};
+
     bool lastHasSnow_{};
     bool lastHasFog_{};
     bool lastPaused_{};
