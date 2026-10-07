@@ -30,6 +30,10 @@ COLORREF statusColor(bool known, bool on) {
     if (!known) return RGB(145, 145, 155);
     return on ? RGB(88, 210, 130) : RGB(235, 105, 105);
 }
+
+const wchar_t* onOff(bool value) {
+    return value ? L"ON" : L"OFF";
+}
 }
 
 bool EnvironmentInspector::start(EnvironmentSystem* environment, std::uintptr_t moduleBase) noexcept {
@@ -94,16 +98,16 @@ bool EnvironmentInspector::createWindow() noexcept {
     wc.lpfnWndProc = &EnvironmentInspector::wndProc;
     wc.hInstance = instance;
     wc.lpszClassName = L"OutlawsEnvironmentInspector";
-    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-    wc.hbrBackground = CreateSolidBrush(RGB(22, 22, 26));
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground = CreateSolidBrush(RGB(19, 20, 24));
     RegisterClassExW(&wc);
 
     hwnd_ = CreateWindowExW(
         WS_EX_TOOLWINDOW,
         wc.lpszClassName,
-        L"Outlaws Tools — Environment Inspector",
+        L"Outlaws Tools - Environment Monitor",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        80, 80, 650, 760,
+        80, 80, 720, 830,
         nullptr, nullptr, instance, this);
 
     if (!hwnd_) return false;
@@ -122,13 +126,13 @@ bool EnvironmentInspector::createWindow() noexcept {
         {kBtn0600, 24, 104, L"06:00"},
         {kBtn1200, 136, 104, L"12:00"},
         {kBtn1800, 248, 104, L"18:00"},
-        {kBtnPause, 374, 104, L"Pause TOD"},
-        {kBtnResume, 486, 116, L"Resume TOD"},
+        {kBtnPause, 374, 120, L"Pause TOD"},
+        {kBtnResume, 502, 140, L"Resume TOD"},
     };
 
     for (const auto& b : buttons) {
         HWND h = CreateWindowW(L"BUTTON", b.text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                               b.x, 628, b.w, 32, hwnd_,
+                               b.x, 706, b.w, 32, hwnd_,
                                reinterpret_cast<HMENU>(static_cast<INT_PTR>(b.id)),
                                instance, nullptr);
         if (h && font_) SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
@@ -136,7 +140,7 @@ bool EnvironmentInspector::createWindow() noexcept {
 
     SetTimer(hwnd_, kTimerId, 250, nullptr);
     sample();
-    appendLog("Environment Inspector started");
+    appendLog("Environment Monitor started");
 
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
@@ -230,76 +234,193 @@ void EnvironmentInspector::sample() noexcept {
     if (!environment_) return;
 
     EnvironmentState state{};
-    const bool ok = environment_->read(state);
-
-    todAvailable_ = ok;
-    if (ok) {
+    todAvailable_ = environment_->read(state);
+    if (todAvailable_) {
         timeOfDay_ = state.timeOfDay;
         timePaused_ = state.timePaused;
-
-        if (!firstSample_ && lastPaused_ != timePaused_) {
-            char line[160]{};
-            std::snprintf(line, sizeof(line),
-                "=== ENVIRONMENT CHANGE ===\nTOD Paused: %s -> %s",
-                lastPaused_ ? "ON" : "OFF",
-                timePaused_ ? "ON" : "OFF");
-            appendLog(line);
-        }
-
-        lastPaused_ = timePaused_;
     }
 
+    WeatherSceneState weather{};
+    weatherAvailable_ = environment_->readWeatherScene(weather);
+    if (weatherAvailable_) {
+        weatherManager_ = weather.manager;
+        weatherPreset_ = weather.preset;
+        activePresetIndex_ = weather.activePresetIndex;
+
+        gameplayRainField_ = weather.gameplayRainField;
+        graphicsRainField_ = weather.graphicsRainField;
+        temperatureField_ = weather.temperatureField;
+        viewDistanceField_ = weather.viewDistanceField;
+        outdoorFogField_ = weather.outdoorFogField;
+        cloudCoverageField_ = weather.cloudCoverageField;
+        windDirectionField_ = weather.windDirectionField;
+        windStrengthField_ = weather.windStrengthField;
+        hasSnow_ = weather.hasSnow;
+        hasFog_ = weather.hasFog;
+    }
+
+    if (!firstSample_) {
+        const bool weatherChanged =
+            lastWeatherManager_ != weatherManager_ ||
+            lastWeatherPreset_ != weatherPreset_ ||
+            lastActivePresetIndex_ != activePresetIndex_ ||
+            lastGameplayRainField_ != gameplayRainField_ ||
+            lastGraphicsRainField_ != graphicsRainField_ ||
+            lastTemperatureField_ != temperatureField_ ||
+            lastViewDistanceField_ != viewDistanceField_ ||
+            lastOutdoorFogField_ != outdoorFogField_ ||
+            lastCloudCoverageField_ != cloudCoverageField_ ||
+            lastWindDirectionField_ != windDirectionField_ ||
+            lastWindStrengthField_ != windStrengthField_ ||
+            lastHasSnow_ != hasSnow_ ||
+            lastHasFog_ != hasFog_;
+
+        if (weatherChanged || (todAvailable_ && lastPaused_ != timePaused_)) {
+            logSceneChange();
+        }
+    }
+
+    lastWeatherManager_ = weatherManager_;
+    lastWeatherPreset_ = weatherPreset_;
+    lastActivePresetIndex_ = activePresetIndex_;
+    lastGameplayRainField_ = gameplayRainField_;
+    lastGraphicsRainField_ = graphicsRainField_;
+    lastTemperatureField_ = temperatureField_;
+    lastViewDistanceField_ = viewDistanceField_;
+    lastOutdoorFogField_ = outdoorFogField_;
+    lastCloudCoverageField_ = cloudCoverageField_;
+    lastWindDirectionField_ = windDirectionField_;
+    lastWindStrengthField_ = windStrengthField_;
+    lastHasSnow_ = hasSnow_;
+    lastHasFog_ = hasFog_;
+    lastPaused_ = timePaused_;
     firstSample_ = false;
 }
 
+void EnvironmentInspector::logSceneChange() noexcept {
+    char line[2048]{};
+    std::snprintf(line, sizeof(line),
+        "=== ENVIRONMENT CHANGE ===\n"
+        "WeatherManager: 0x%llX -> 0x%llX\n"
+        "Preset: 0x%llX -> 0x%llX\n"
+        "Preset Index: %d -> %d\n"
+        "GameplayRain Field: %s -> %s\n"
+        "GraphicsRain Field: %s -> %s\n"
+        "Temperature Field: %s -> %s\n"
+        "ViewDistance Field: %s -> %s\n"
+        "OutdoorFog Field: %s -> %s\n"
+        "CloudCoverage Field: %s -> %s\n"
+        "WindDirection Field: %s -> %s\n"
+        "WindStrength Field: %s -> %s\n"
+        "Snow: %s -> %s\n"
+        "Fog: %s -> %s\n"
+        "TOD Paused: %s -> %s",
+        static_cast<unsigned long long>(lastWeatherManager_),
+        static_cast<unsigned long long>(weatherManager_),
+        static_cast<unsigned long long>(lastWeatherPreset_),
+        static_cast<unsigned long long>(weatherPreset_),
+        lastActivePresetIndex_, activePresetIndex_,
+        lastGameplayRainField_ ? "ON" : "OFF", gameplayRainField_ ? "ON" : "OFF",
+        lastGraphicsRainField_ ? "ON" : "OFF", graphicsRainField_ ? "ON" : "OFF",
+        lastTemperatureField_ ? "ON" : "OFF", temperatureField_ ? "ON" : "OFF",
+        lastViewDistanceField_ ? "ON" : "OFF", viewDistanceField_ ? "ON" : "OFF",
+        lastOutdoorFogField_ ? "ON" : "OFF", outdoorFogField_ ? "ON" : "OFF",
+        lastCloudCoverageField_ ? "ON" : "OFF", cloudCoverageField_ ? "ON" : "OFF",
+        lastWindDirectionField_ ? "ON" : "OFF", windDirectionField_ ? "ON" : "OFF",
+        lastWindStrengthField_ ? "ON" : "OFF", windStrengthField_ ? "ON" : "OFF",
+        lastHasSnow_ ? "ON" : "OFF", hasSnow_ ? "ON" : "OFF",
+        lastHasFog_ ? "ON" : "OFF", hasFog_ ? "ON" : "OFF",
+        lastPaused_ ? "ON" : "OFF", timePaused_ ? "ON" : "OFF");
+    appendLog(line);
+}
+
 void EnvironmentInspector::paint(HDC dc, const RECT& client) noexcept {
-    HBRUSH bg = CreateSolidBrush(RGB(22, 22, 26));
+    HBRUSH bg = CreateSolidBrush(RGB(19, 20, 24));
     FillRect(dc, &client, bg);
     DeleteObject(bg);
 
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(235, 235, 240));
+    SetTextColor(dc, RGB(238, 238, 244));
 
-    RECT title{24, 20, client.right - 24, 55};
+    RECT title{24, 18, client.right - 24, 52};
     SelectObject(dc, fontBold_);
-    DrawTextW(dc, L"Environment Inspector", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(dc, L"Environment Monitor", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    RECT sub{24, 52, client.right - 24, 78};
+    RECT sub{24, 48, client.right - 24, 76};
     SelectObject(dc, font_);
-    SetTextColor(dc, RGB(150, 150, 165));
-    DrawTextW(dc, L"Scene-aware weather diagnostics — read-only except validated TOD controls", -1,
-              &sub, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SetTextColor(dc, RGB(145, 148, 162));
+    DrawTextW(dc, L"Active-scene WeatherPreset observer — F10 toggles this window",
+              -1, &sub, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    int y = 92;
-    drawSection(dc, y, 24, client.right - 24, L"SCENE / WEATHER STATUS");
-    drawRow(dc, y, 24, client.right - 24, L"Scene / Zone", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Weather Preset", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Indoor", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Level Weather Override", L"UNRESOLVED", RGB(145,145,155));
+    int y = 88;
+
+    drawSection(dc, y, 24, client.right - 24, L"ACTIVE SCENE / PRESET");
+
+    wchar_t managerText[64]{};
+    wchar_t presetText[64]{};
+    wchar_t indexText[64]{};
+    if (weatherAvailable_) {
+        std::swprintf(managerText, std::size(managerText), L"0x%llX",
+                      static_cast<unsigned long long>(weatherManager_));
+        if (weatherPreset_) {
+            std::swprintf(presetText, std::size(presetText), L"0x%llX",
+                          static_cast<unsigned long long>(weatherPreset_));
+        } else {
+            wcscpy_s(presetText, L"NONE / TRANSITION");
+        }
+        std::swprintf(indexText, std::size(indexText), L"%d", activePresetIndex_);
+    } else {
+        wcscpy_s(managerText, L"UNAVAILABLE");
+        wcscpy_s(presetText, L"UNAVAILABLE");
+        wcscpy_s(indexText, L"UNAVAILABLE");
+    }
+
+    drawRow(dc, y, 24, client.right - 24, L"Weather Manager", managerText,
+            weatherAvailable_ ? RGB(112,190,255) : RGB(145,145,155));
+    drawRow(dc, y, 24, client.right - 24, L"Active Weather Preset", presetText,
+            weatherPreset_ ? RGB(112,190,255) : RGB(245,190,90));
+    drawRow(dc, y, 24, client.right - 24, L"Preset / Transition Index", indexText,
+            weatherAvailable_ ? RGB(190,190,205) : RGB(145,145,155));
 
     y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"PRECIPITATION");
-    drawRow(dc, y, 24, client.right - 24, L"Raining", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Precipitation Intensity", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Gameplay Rain", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Graphics Rain", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Sandstorm", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Snow", L"UNRESOLVED", RGB(145,145,155));
+    drawSection(dc, y, 24, client.right - 24, L"WEATHER PRESET CONTRIBUTIONS");
+    drawRow(dc, y, 24, client.right - 24, L"Gameplay Rain", onOff(gameplayRainField_),
+            statusColor(weatherAvailable_, gameplayRainField_));
+    drawRow(dc, y, 24, client.right - 24, L"Graphics Rain", onOff(graphicsRainField_),
+            statusColor(weatherAvailable_, graphicsRainField_));
+    drawRow(dc, y, 24, client.right - 24, L"Outdoor Fog", onOff(outdoorFogField_),
+            statusColor(weatherAvailable_, outdoorFogField_));
+    drawRow(dc, y, 24, client.right - 24, L"Cloud Coverage", onOff(cloudCoverageField_),
+            statusColor(weatherAvailable_, cloudCoverageField_));
+    drawRow(dc, y, 24, client.right - 24, L"Wind Direction", onOff(windDirectionField_),
+            statusColor(weatherAvailable_, windDirectionField_));
+    drawRow(dc, y, 24, client.right - 24, L"Wind Strength", onOff(windStrengthField_),
+            statusColor(weatherAvailable_, windStrengthField_));
+    drawRow(dc, y, 24, client.right - 24, L"Temperature", onOff(temperatureField_),
+            statusColor(weatherAvailable_, temperatureField_));
+    drawRow(dc, y, 24, client.right - 24, L"View Distance", onOff(viewDistanceField_),
+            statusColor(weatherAvailable_, viewDistanceField_));
 
     y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"ATMOSPHERE");
-    drawRow(dc, y, 24, client.right - 24, L"Fog", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Outdoor Fog", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Cloud Cover", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Wind Strength", L"UNRESOLVED", RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Weather Mask Wetness", L"UNRESOLVED", RGB(145,145,155));
+    drawSection(dc, y, 24, client.right - 24, L"WEATHER FLAGS");
+    drawRow(dc, y, 24, client.right - 24, L"Snow", onOff(hasSnow_),
+            statusColor(weatherAvailable_, hasSnow_));
+    drawRow(dc, y, 24, client.right - 24, L"Fog", onOff(hasFog_),
+            statusColor(weatherAvailable_, hasFog_));
+    drawRow(dc, y, 24, client.right - 24, L"Indoor / Outdoor", L"PENDING NATIVE PROBE",
+            RGB(245,190,90));
+    drawRow(dc, y, 24, client.right - 24, L"Weather Mask Wetness", L"PENDING NATIVE PROBE",
+            RGB(245,190,90));
+    drawRow(dc, y, 24, client.right - 24, L"Sandstorm Tag", L"PENDING NATIVE PROBE",
+            RGB(245,190,90));
 
     y += 10;
     drawSection(dc, y, 24, client.right - 24, L"TIME OF DAY");
 
     wchar_t timeText[64]{};
     if (todAvailable_) {
-        const int totalSeconds = static_cast<int>(timeOfDay_ * 3600.0f);
+        int totalSeconds = static_cast<int>(timeOfDay_ * 3600.0f);
+        if (totalSeconds < 0) totalSeconds = 0;
         const int hh = (totalSeconds / 3600) % 24;
         const int mm = (totalSeconds / 60) % 60;
         const int ss = totalSeconds % 60;
@@ -308,38 +429,35 @@ void EnvironmentInspector::paint(HDC dc, const RECT& client) noexcept {
         wcscpy_s(timeText, L"UNAVAILABLE");
     }
 
-    drawRow(dc, y, 24, client.right - 24, L"Current Time",
-            timeText, todAvailable_ ? RGB(112, 190, 255) : RGB(145,145,155));
+    drawRow(dc, y, 24, client.right - 24, L"Current Time", timeText,
+            todAvailable_ ? RGB(112,190,255) : RGB(145,145,155));
     drawRow(dc, y, 24, client.right - 24, L"Paused",
-            todAvailable_ ? (timePaused_ ? L"ON" : L"OFF") : L"UNAVAILABLE",
+            todAvailable_ ? onOff(timePaused_) : L"UNAVAILABLE",
             statusColor(todAvailable_, timePaused_));
 
     y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"DIAGNOSTICS");
-
-    wchar_t baseText[64]{};
-    std::swprintf(baseText, std::size(baseText), L"0x%llX",
-                  static_cast<unsigned long long>(moduleBase_));
-    drawRow(dc, y, 24, client.right - 24, L"Module Base", baseText, RGB(190,190,205));
-
-    drawRow(dc, y, 24, client.right - 24, L"Weather probes",
-            L"PENDING REVERSE", RGB(245, 190, 90));
+    drawSection(dc, y, 24, client.right - 24, L"STATUS");
+    drawRow(dc, y, 24, client.right - 24, L"Scene-change logger", L"ACTIVE",
+            RGB(88,210,130));
+    drawRow(dc, y, 24, client.right - 24, L"Unsafe descriptor writes", L"DISABLED",
+            RGB(88,210,130));
 
     RECT foot{24, client.bottom - 58, client.right - 24, client.bottom - 16};
     SelectObject(dc, font_);
-    SetTextColor(dc, RGB(125,125,140));
-    DrawTextW(dc, L"Only validated data is shown as live. Unresolved fields are never guessed.",
+    SetTextColor(dc, RGB(120,123,136));
+    DrawTextW(dc,
+              L"Only verified scene data is displayed as live. Pending probes are explicitly marked.",
               -1, &foot, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
 void EnvironmentInspector::drawSection(HDC dc, int& y, int left, int right, const wchar_t* title) noexcept {
     RECT r{left, y, right, y + 28};
-    HBRUSH brush = CreateSolidBrush(RGB(31, 31, 38));
+    HBRUSH brush = CreateSolidBrush(RGB(29, 31, 38));
     FillRect(dc, &r, brush);
     DeleteObject(brush);
 
     SelectObject(dc, fontBold_);
-    SetTextColor(dc, RGB(210, 210, 220));
+    SetTextColor(dc, RGB(214, 216, 226));
     RECT t{left + 10, y, right - 10, y + 28};
     DrawTextW(dc, title, -1, &t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     y += 30;
@@ -349,17 +467,17 @@ void EnvironmentInspector::drawRow(HDC dc, int& y, int left, int right,
                                    const wchar_t* label, const wchar_t* value,
                                    COLORREF valueColor) noexcept {
     RECT r{left, y, right, y + 25};
-    HBRUSH brush = CreateSolidBrush((y / 25) % 2 ? RGB(25,25,30) : RGB(27,27,33));
+    HBRUSH brush = CreateSolidBrush((y / 25) % 2 ? RGB(23,24,29) : RGB(25,26,31));
     FillRect(dc, &r, brush);
     DeleteObject(brush);
 
     SelectObject(dc, font_);
-    SetTextColor(dc, RGB(180,180,192));
-    RECT l{left + 10, y, left + 310, y + 25};
+    SetTextColor(dc, RGB(177,180,192));
+    RECT l{left + 10, y, left + 330, y + 25};
     DrawTextW(dc, label, -1, &l, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     SetTextColor(dc, valueColor);
-    RECT v{left + 320, y, right - 10, y + 25};
+    RECT v{left + 340, y, right - 10, y + 25};
     DrawTextW(dc, value, -1, &v, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
     y += 25;
 }
