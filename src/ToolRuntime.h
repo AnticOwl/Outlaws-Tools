@@ -2,6 +2,7 @@
 #include "GameBindings.h"
 #include "LightSystem.h"
 #include "EnvironmentSystem.h"
+#include "EnvironmentInspector.h"
 #include "PostProcessSystem.h"
 #include <atomic>
 
@@ -16,6 +17,7 @@ public:
     GameBindings bindings;
     LightSystem lights;
     EnvironmentSystem environment;
+    EnvironmentInspector inspector;
     PostProcessSystem post;
 private:
     std::atomic_bool m_running{};
