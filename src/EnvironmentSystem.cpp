@@ -8,6 +8,21 @@
 
 namespace outlaws {
 namespace {
+bool readable(std::uintptr_t address, std::size_t size) noexcept {
+    if (!address || !size) return false;
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(reinterpret_cast<const void*>(address), &mbi, sizeof(mbi))) return false;
+    if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+    const DWORD p = mbi.Protect & 0xFF;
+    const bool canRead =
+        p == PAGE_READONLY || p == PAGE_READWRITE || p == PAGE_WRITECOPY ||
+        p == PAGE_EXECUTE_READ || p == PAGE_EXECUTE_READWRITE || p == PAGE_EXECUTE_WRITECOPY;
+    if (!canRead) return false;
+    const auto begin = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
+    const auto end = begin + mbi.RegionSize;
+    return address >= begin && address + size >= address && address + size <= end;
+}
+
 std::filesystem::path logPath() {
     wchar_t buffer[MAX_PATH]{};
     const auto len = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
@@ -34,6 +49,51 @@ void EnvironmentSystem::appendLog(const char* text) const noexcept {
     if (!log) return;
     log << text << "\n";
     log.flush();
+}
+
+void* EnvironmentSystem::resolveWeatherManager() const noexcept {
+    if (!moduleBase_) return nullptr;
+
+    const auto rootAddress = moduleBase_ + TodRootRva;
+    if (!readable(rootAddress, sizeof(std::uintptr_t))) return nullptr;
+    const auto root = *reinterpret_cast<const std::uintptr_t*>(rootAddress);
+    if (!root || !readable(root + 0xD08, sizeof(std::uintptr_t))) return nullptr;
+
+    const auto slotAddress = moduleBase_ + TodSlotRva;
+    if (!readable(slotAddress, sizeof(std::uint32_t))) return nullptr;
+    const auto slot = *reinterpret_cast<const std::uint32_t*>(slotAddress);
+    if (slot >= 0x1000) return nullptr;
+
+    const auto table = *reinterpret_cast<const std::uintptr_t*>(root + 0xD08);
+    const auto ownerAddress = table + static_cast<std::uintptr_t>(slot) * 8u;
+    if (!table || !readable(ownerAddress, sizeof(std::uintptr_t))) return nullptr;
+
+    const auto owner = *reinterpret_cast<const std::uintptr_t*>(ownerAddress);
+    if (!owner || !readable(owner, 0x360)) return nullptr;
+    return reinterpret_cast<void*>(owner);
+}
+
+void* EnvironmentSystem::resolveActiveWeatherPreset(void* manager) const noexcept {
+    const auto base = reinterpret_cast<std::uintptr_t>(manager);
+    if (!base || !readable(base, 0x360)) return nullptr;
+
+    const auto index = *reinterpret_cast<const std::int32_t*>(base + 0x354);
+    std::uintptr_t source{};
+
+    if (index == -1) {
+        source = *reinterpret_cast<const std::uintptr_t*>(base + 0xF0);
+    } else {
+        const auto level = *reinterpret_cast<const std::uintptr_t*>(base + 0x88);
+        if (!level || !readable(level + 0x8, sizeof(std::uintptr_t))) return nullptr;
+        const auto state = *reinterpret_cast<const std::uintptr_t*>(level + 0x8);
+        if (!state || !readable(state + 0x40, sizeof(std::uintptr_t))) return nullptr;
+        source = *reinterpret_cast<const std::uintptr_t*>(state + 0x40);
+    }
+
+    if (!source || !readable(source + 0x60, sizeof(std::uintptr_t))) return nullptr;
+    const auto preset = *reinterpret_cast<const std::uintptr_t*>(source + 0x60);
+    if (!preset || !readable(preset, 0x2BA)) return nullptr;
+    return reinterpret_cast<void*>(preset);
 }
 
 void* EnvironmentSystem::resolveTimeOfDaySystem() const noexcept {
@@ -127,6 +187,43 @@ bool EnvironmentSystem::setTimePaused(bool paused) noexcept {
         before ? "ON" : "OFF", after ? "ON" : "OFF");
     appendLog(line);
     return after == paused;
+}
+
+bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept {
+    out = {};
+
+    auto* manager = resolveWeatherManager();
+    if (!manager) return false;
+
+    const auto managerAddress = reinterpret_cast<std::uintptr_t>(manager);
+    out.manager = managerAddress;
+    out.activePresetIndex = *reinterpret_cast<const std::int32_t*>(managerAddress + 0x354);
+
+    auto* preset = resolveActiveWeatherPreset(manager);
+    if (!preset) {
+        out.available = true;
+        return true;
+    }
+
+    const auto p = reinterpret_cast<std::uintptr_t>(preset);
+    out.preset = p;
+    out.available = true;
+
+    // Presence flags reconstructed from HC_EnvironmentWeatherPresetConstantData
+    // deserialization. They tell us whether the active scene preset contributes
+    // each field; they are not guessed "current renderer values".
+    out.gameplayRainField   = *reinterpret_cast<const std::uint8_t*>(p + 0x080) != 0;
+    out.graphicsRainField   = *reinterpret_cast<const std::uint8_t*>(p + 0x0D0) != 0;
+    out.temperatureField    = *reinterpret_cast<const std::uint8_t*>(p + 0x120) != 0;
+    out.viewDistanceField   = *reinterpret_cast<const std::uint8_t*>(p + 0x170) != 0;
+    out.outdoorFogField     = *reinterpret_cast<const std::uint8_t*>(p + 0x1C0) != 0;
+    out.cloudCoverageField  = *reinterpret_cast<const std::uint8_t*>(p + 0x210) != 0;
+    out.windDirectionField  = *reinterpret_cast<const std::uint8_t*>(p + 0x260) != 0;
+    out.windStrengthField   = *reinterpret_cast<const std::uint8_t*>(p + 0x2B0) != 0;
+
+    out.hasSnow = *reinterpret_cast<const std::uint8_t*>(p + 0x2B8) != 0;
+    out.hasFog  = *reinterpret_cast<const std::uint8_t*>(p + 0x2B9) != 0;
+    return true;
 }
 
 bool EnvironmentSystem::read(EnvironmentState& out) const {
