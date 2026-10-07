@@ -63,11 +63,19 @@ bool ToolRuntime::start() {
     }
 
     writeLine("post disabled for Environment/Weather testing");
+
+    if (inspector.start(&environment, bindings.moduleBase)) {
+        writeLine("environment inspector started");
+    } else {
+        writeLine("environment inspector failed");
+    }
+
     return true;
 }
 
 void ToolRuntime::stop() {
     if (!m_running.exchange(false)) return;
+    inspector.stop();
     environment.shutdown();
     bindings.shutdown();
 }
