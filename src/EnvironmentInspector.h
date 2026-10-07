@@ -2,7 +2,6 @@
 #include <Windows.h>
 #include <atomic>
 #include <cstdint>
-#include <thread>
 
 namespace outlaws {
 
@@ -26,6 +25,7 @@ private:
     void sample() noexcept;
     void paint(HDC dc, const RECT& client) noexcept;
     void appendLog(const char* text) const noexcept;
+    void logSceneChange() noexcept;
 
     void drawSection(HDC dc, int& y, int left, int right, const wchar_t* title) noexcept;
     void drawRow(HDC dc, int& y, int left, int right, const wchar_t* label,
@@ -44,9 +44,38 @@ private:
     float timeOfDay_{};
     bool timePaused_{};
     bool todAvailable_{};
-    std::uintptr_t todSystem_{};
+
+    bool weatherAvailable_{};
+    std::uintptr_t weatherManager_{};
+    std::uintptr_t weatherPreset_{};
+    std::int32_t activePresetIndex_{-1};
+
+    bool gameplayRainField_{};
+    bool graphicsRainField_{};
+    bool temperatureField_{};
+    bool viewDistanceField_{};
+    bool outdoorFogField_{};
+    bool cloudCoverageField_{};
+    bool windDirectionField_{};
+    bool windStrengthField_{};
+    bool hasSnow_{};
+    bool hasFog_{};
 
     bool firstSample_{true};
+
+    std::uintptr_t lastWeatherManager_{};
+    std::uintptr_t lastWeatherPreset_{};
+    std::int32_t lastActivePresetIndex_{-1};
+    bool lastGameplayRainField_{};
+    bool lastGraphicsRainField_{};
+    bool lastTemperatureField_{};
+    bool lastViewDistanceField_{};
+    bool lastOutdoorFogField_{};
+    bool lastCloudCoverageField_{};
+    bool lastWindDirectionField_{};
+    bool lastWindStrengthField_{};
+    bool lastHasSnow_{};
+    bool lastHasFog_{};
     bool lastPaused_{};
 };
 
