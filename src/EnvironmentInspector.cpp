@@ -94,7 +94,7 @@ bool EnvironmentInspector::createWindow() noexcept {
     wc.lpfnWndProc = &EnvironmentInspector::wndProc;
     wc.hInstance = instance;
     wc.lpszClassName = L"OutlawsEnvironmentInspector";
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     wc.hbrBackground = CreateSolidBrush(RGB(22, 22, 26));
     RegisterClassExW(&wc);
 
@@ -305,7 +305,7 @@ void EnvironmentInspector::paint(HDC dc, const RECT& client) noexcept {
         const int ss = totalSeconds % 60;
         std::swprintf(timeText, std::size(timeText), L"%02d:%02d:%02d", hh, mm, ss);
     } else {
-        std::wcscpy(timeText, L"UNAVAILABLE");
+        wcscpy_s(timeText, L"UNAVAILABLE");
     }
 
     drawRow(dc, y, 24, client.right - 24, L"Current Time",
