@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 
@@ -35,13 +34,6 @@ void EnvironmentSystem::appendLog(const char* text) const noexcept {
     if (!log) return;
     log << text << "\n";
     log.flush();
-}
-
-void* EnvironmentSystem::lookupRuntimeValue(const char* name) const noexcept {
-    if (!moduleBase_ || !name || !*name) return nullptr;
-    using RuntimeLookupFn = void*(*)(const char*);
-    auto lookup = reinterpret_cast<RuntimeLookupFn>(moduleBase_ + RuntimeLookupRva);
-    return lookup(name);
 }
 
 void* EnvironmentSystem::resolveTimeOfDaySystem() const noexcept {
@@ -135,80 +127,6 @@ bool EnvironmentSystem::setTimePaused(bool paused) noexcept {
         before ? "ON" : "OFF", after ? "ON" : "OFF");
     appendLog(line);
     return after == paused;
-}
-
-bool EnvironmentSystem::logRain() const noexcept {
-    const auto* record = static_cast<const std::uint8_t*>(
-        lookupRuntimeValue("Env_GameplayRainAmount"));
-    if (!record) {
-        appendLog("WEATHER Rain Env_GameplayRainAmount = <not found>");
-        return false;
-    }
-
-    const auto type = *reinterpret_cast<const std::uint32_t*>(record + 0x00);
-    const float value = *reinterpret_cast<const float*>(record + 0x10);
-
-    char line[224]{};
-    std::snprintf(line, sizeof(line),
-        "WEATHER Rain runtime type=%u value=%g record=0x%llX",
-        type,
-        value,
-        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)));
-    appendLog(line);
-    return true;
-}
-
-bool EnvironmentSystem::logRainMetadata() const noexcept {
-    if (!moduleBase_) return false;
-
-    const auto descriptor = moduleBase_ + EnvRegistryOwnerRva
-        + static_cast<std::uintptr_t>(GameplayRainId) * 0x40u;
-
-    const auto defaultBits = *reinterpret_cast<const std::uint32_t*>(descriptor + 0x00);
-    float defaultValue{};
-    std::memcpy(&defaultValue, &defaultBits, sizeof(defaultValue));
-
-    const bool hasMin = *reinterpret_cast<const std::uint8_t*>(descriptor + 0x18) != 0;
-    const float minValue = *reinterpret_cast<const float*>(descriptor + 0x1C);
-    const bool hasMax = *reinterpret_cast<const std::uint8_t*>(descriptor + 0x20) != 0;
-    const float maxValue = *reinterpret_cast<const float*>(descriptor + 0x24);
-    const auto id = *reinterpret_cast<const std::uint16_t*>(descriptor + 0x34);
-    const auto name = *reinterpret_cast<const char* const*>(descriptor + 0x38);
-
-    char line[320]{};
-    std::snprintf(line, sizeof(line),
-        "WEATHER Rain descriptor id=0x%X name=%s default=%g min=%s%g max=%s%g",
-        static_cast<unsigned>(id),
-        name ? name : "<null>",
-        defaultValue,
-        hasMin ? "" : "<none>",
-        minValue,
-        hasMax ? "" : "<none>",
-        maxValue);
-    appendLog(line);
-    return true;
-}
-
-bool EnvironmentSystem::setRain(float value) noexcept {
-    auto* record = static_cast<std::uint8_t*>(
-        lookupRuntimeValue("Env_GameplayRainAmount"));
-    if (!record) {
-        appendLog("WEATHER Rain DIRECT = <not found>");
-        return false;
-    }
-
-    auto* liveValue = reinterpret_cast<float*>(record + 0x10);
-    const float before = *liveValue;
-    *liveValue = value;
-    const float immediate = *liveValue;
-
-    char line[256]{};
-    std::snprintf(line, sizeof(line),
-        "WEATHER Rain DIRECT record=0x%llX value %g -> %g immediate=%g",
-        static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(record)),
-        before, value, immediate);
-    appendLog(line);
-    return immediate == value;
 }
 
 bool EnvironmentSystem::read(EnvironmentState& out) const {
