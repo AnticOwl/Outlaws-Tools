@@ -10,16 +10,13 @@ DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
     auto& runtime = outlaws::ToolRuntime::instance();
     if (!runtime.start()) return 0;
 
-    runtime.environment.logRain();
-    runtime.environment.logRainMetadata();
-
     while (runtime.running()) {
-        if (pressed(VK_HOME)) {
-            runtime.environment.logRain();
-            runtime.environment.logRainMetadata();
-        }
-        if (pressed(VK_NEXT))  runtime.environment.setRain(0.0f); // PageDown
-        if (pressed(VK_PRIOR)) runtime.environment.setRain(1.0f); // PageUp
+        if (pressed(VK_HOME))   runtime.environment.logTimeOfDay();
+        if (pressed(VK_NEXT))   runtime.environment.setTimeOfDay(6.0f);    // PageDown
+        if (pressed(VK_PRIOR))  runtime.environment.setTimeOfDay(18.0f);   // PageUp
+        if (pressed(VK_INSERT)) runtime.environment.setTimePaused(true);
+        if (pressed(VK_DELETE)) runtime.environment.setTimePaused(false);
+        if (pressed(VK_F10))    runtime.inspector.toggle();
         Sleep(50);
     }
     return 0;
