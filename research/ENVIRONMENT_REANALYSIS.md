@@ -440,3 +440,145 @@ EnvironmentControl:Clouds
 EnvironmentControl:Sky
 EnvironmentControl:SetValue
 ```
+
+
+## 14. Weather scene gating / mask findings
+
+Further executable string analysis confirms that visual precipitation is spatially gated and scene-dependent.
+
+Relevant native nodes and graphics systems:
+
+```text
+World/Is Indoor
+native:IsIndoor
+
+World/Sample Weather Mask
+native:SampleWeatherMask
+
+World/Get Environment Precipitation
+Environment:GetEnvironmentPrecipitation
+
+World/Get Precipitation Intensity
+native:GetEnvironmentPrecipitationIntensity
+
+Prefab/Get Object Weather Mask
+prefab:GetObjectWeatherMask
+
+Gfx_WeatherMask::RunWeatherSamples
+Gfx_WeatherMask::RunWeatherRequests
+```
+
+Renderer/shader state also exposes:
+
+```text
+Gfx_IsIndoor
+weatherMask
+roofWeatherMask
+floorWeatherMask
+WeatherMask
+GFX_NO_INDOOR
+GFX_NO_OUTDOOR
+Auto, Force_Indoor, Force_Outdoor
+indoorstate
+```
+
+This is strong evidence that precipitation visibility is not driven only by the weather preset amount. The renderer samples a spatial WeatherMask and indoor/outdoor state.
+
+Likely rendering chain:
+
+```text
+WeatherPreset
+  -> gameplay/graphics precipitation amounts
+  -> Environment precipitation state
+  -> indoor/outdoor state
+  -> spatial WeatherMask / roof mask
+  -> particle/render precipitation
+```
+
+Therefore a scene can plausibly have rain requested by the preset while visual rain remains suppressed by indoor state, a roof mask, a scene mask, or an explicit indoor/outdoor override.
+
+### Related gameplay reactions
+
+The executable also contains reaction settings which consume weather state:
+
+```text
+myOutDoorTimeInterval
+myReactIndoor
+myShouldReactOutdoorTransition
+myMinRainAmount
+myCheckObstaclesAbovePlayer
+myRainReactionSettings
+myWindReactionSettings
+```
+
+These are not the renderer itself, but they independently confirm that Snowdrop distinguishes outdoor transitions, rain thresholds and overhead-obstacle tests.
+
+## 15. Weather preset transition manager
+
+The executable contains:
+
+```text
+snowdrop/environment/_default_environment_preset.menvironment
+Tool_EnvironmentPresetloader loading
+myWeatherPresetFile
+myWeatherPresetList
+Weather preset wasn't removed.
+Invalid weather preset.
+Environment manager is in the weather preset transition.
+Transition time can't be less than zero.
+```
+
+This confirms that weather presets are owned by an Environment manager which maintains a preset list and transition state.
+
+A direct Env command can therefore be superseded by:
+
+- the currently active weather preset;
+- an Environment manager transition;
+- a map/mission preset;
+- another removable/temporary preset;
+- scene-specific masking after the preset has been evaluated.
+
+For reliable Weather control, the next reverse should identify:
+
+1. active WeatherPreset pointer / list;
+2. current transition state and blend factor;
+3. gameplay rain and graphics rain values after preset evaluation;
+4. precipitation intensity returned by the native getter;
+5. WeatherMask sample at the camera/player;
+6. indoor/outdoor state at the camera;
+7. whether a map/mission preset rewrites the command after application.
+
+## 16. WeatherPreset fields confirmed by contiguous symbol block
+
+The WeatherPreset constant-data symbol block is contiguous and includes:
+
+```text
+myDawnStart
+myDayStart
+myDuskStart
+myNightStart
+myIndoorTemperature
+myHeatSourceTemperature
+myOverrideTemperature
+mySnowIncreaseSpeed
+mySnowDecreaseSpeed
+myRainIncreaseSpeed
+myRainDecreaseSpeed
+myDustIncreaseSpeed
+myDustDecreaseSpeed
+myCrossEnvironmentBlendTimeInSeconds
+myDayNightCycleInMinutes
+myRealTimeToGameTimeCurve
+deactivategametimeaffectenvironment
+myFileName
+myGameplayRainAmount
+myGraphicsRainAmount
+myTemperature
+myViewDistance
+myOutdoorFog
+myWindDirection
+myHasSnow
+myHasFog
+```
+
+This strongly supports the interpretation that visual weather is preset-driven and blended rather than represented by a single persistent scalar.
