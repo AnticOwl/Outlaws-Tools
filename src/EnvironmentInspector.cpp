@@ -98,7 +98,7 @@ bool EnvironmentInspector::createWindow() noexcept {
     wc.lpfnWndProc = &EnvironmentInspector::wndProc;
     wc.hInstance = instance;
     wc.lpszClassName = L"OutlawsEnvironmentInspector";
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     wc.hbrBackground = CreateSolidBrush(RGB(19, 20, 24));
     RegisterClassExW(&wc);
 
