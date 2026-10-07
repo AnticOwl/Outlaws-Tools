@@ -221,6 +221,15 @@ bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept 
     out.windDirectionField  = *reinterpret_cast<const std::uint8_t*>(p + 0x260) != 0;
     out.windStrengthField   = *reinterpret_cast<const std::uint8_t*>(p + 0x2B0) != 0;
 
+    out.gameplayRain  = *reinterpret_cast<const float*>(p + 0x038);
+    out.graphicsRain  = *reinterpret_cast<const float*>(p + 0x088);
+    out.temperature   = *reinterpret_cast<const float*>(p + 0x0D8);
+    out.viewDistance  = *reinterpret_cast<const float*>(p + 0x128);
+    out.outdoorFog    = *reinterpret_cast<const float*>(p + 0x178);
+    out.cloudCoverage = *reinterpret_cast<const float*>(p + 0x1C8);
+    out.windDirection = *reinterpret_cast<const float*>(p + 0x218);
+    out.windStrength  = *reinterpret_cast<const float*>(p + 0x268);
+
     out.hasSnow = *reinterpret_cast<const std::uint8_t*>(p + 0x2B8) != 0;
     out.hasFog  = *reinterpret_cast<const std::uint8_t*>(p + 0x2B9) != 0;
     return true;
