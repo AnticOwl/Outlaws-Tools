@@ -29,6 +29,15 @@ struct WeatherSceneState {
     bool windDirectionField{};
     bool windStrengthField{};
 
+    float gameplayRain{};
+    float graphicsRain{};
+    float temperature{};
+    float viewDistance{};
+    float outdoorFog{};
+    float cloudCoverage{};
+    float windDirection{};
+    float windStrength{};
+
     bool hasSnow{};
     bool hasFog{};
 };
