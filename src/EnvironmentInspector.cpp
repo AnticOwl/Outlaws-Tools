@@ -107,7 +107,7 @@ bool EnvironmentInspector::createWindow() noexcept {
         wc.lpszClassName,
         L"Outlaws Tools - Environment Monitor",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        80, 80, 720, 830,
+        80, 80, 760, 1060,
         nullptr, nullptr, instance, this);
 
     if (!hwnd_) return false;
@@ -132,7 +132,7 @@ bool EnvironmentInspector::createWindow() noexcept {
 
     for (const auto& b : buttons) {
         HWND h = CreateWindowW(L"BUTTON", b.text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                               b.x, 706, b.w, 32, hwnd_,
+                               b.x, 926, b.w, 32, hwnd_,
                                reinterpret_cast<HMENU>(static_cast<INT_PTR>(b.id)),
                                instance, nullptr);
         if (h && font_) SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
@@ -255,6 +255,16 @@ void EnvironmentInspector::sample() noexcept {
         cloudCoverageField_ = weather.cloudCoverageField;
         windDirectionField_ = weather.windDirectionField;
         windStrengthField_ = weather.windStrengthField;
+
+        gameplayRain_ = weather.gameplayRain;
+        graphicsRain_ = weather.graphicsRain;
+        temperature_ = weather.temperature;
+        viewDistance_ = weather.viewDistance;
+        outdoorFog_ = weather.outdoorFog;
+        cloudCoverage_ = weather.cloudCoverage;
+        windDirection_ = weather.windDirection;
+        windStrength_ = weather.windStrength;
+
         hasSnow_ = weather.hasSnow;
         hasFog_ = weather.hasFog;
     }
@@ -272,6 +282,14 @@ void EnvironmentInspector::sample() noexcept {
             lastCloudCoverageField_ != cloudCoverageField_ ||
             lastWindDirectionField_ != windDirectionField_ ||
             lastWindStrengthField_ != windStrengthField_ ||
+            lastGameplayRain_ != gameplayRain_ ||
+            lastGraphicsRain_ != graphicsRain_ ||
+            lastTemperature_ != temperature_ ||
+            lastViewDistance_ != viewDistance_ ||
+            lastOutdoorFog_ != outdoorFog_ ||
+            lastCloudCoverage_ != cloudCoverage_ ||
+            lastWindDirection_ != windDirection_ ||
+            lastWindStrength_ != windStrength_ ||
             lastHasSnow_ != hasSnow_ ||
             lastHasFog_ != hasFog_;
 
@@ -291,6 +309,16 @@ void EnvironmentInspector::sample() noexcept {
     lastCloudCoverageField_ = cloudCoverageField_;
     lastWindDirectionField_ = windDirectionField_;
     lastWindStrengthField_ = windStrengthField_;
+
+    lastGameplayRain_ = gameplayRain_;
+    lastGraphicsRain_ = graphicsRain_;
+    lastTemperature_ = temperature_;
+    lastViewDistance_ = viewDistance_;
+    lastOutdoorFog_ = outdoorFog_;
+    lastCloudCoverage_ = cloudCoverage_;
+    lastWindDirection_ = windDirection_;
+    lastWindStrength_ = windStrength_;
+
     lastHasSnow_ = hasSnow_;
     lastHasFog_ = hasFog_;
     lastPaused_ = timePaused_;
@@ -312,6 +340,14 @@ void EnvironmentInspector::logSceneChange() noexcept {
         "CloudCoverage Field: %s -> %s\n"
         "WindDirection Field: %s -> %s\n"
         "WindStrength Field: %s -> %s\n"
+        "GameplayRain: %.4f -> %.4f\n"
+        "GraphicsRain: %.4f -> %.4f\n"
+        "Temperature: %.4f -> %.4f\n"
+        "ViewDistance: %.4f -> %.4f\n"
+        "OutdoorFog: %.4f -> %.4f\n"
+        "CloudCoverage: %.4f -> %.4f\n"
+        "WindDirection: %.4f -> %.4f\n"
+        "WindStrength: %.4f -> %.4f\n"
         "Snow: %s -> %s\n"
         "Fog: %s -> %s\n"
         "TOD Paused: %s -> %s",
@@ -328,6 +364,14 @@ void EnvironmentInspector::logSceneChange() noexcept {
         lastCloudCoverageField_ ? "ON" : "OFF", cloudCoverageField_ ? "ON" : "OFF",
         lastWindDirectionField_ ? "ON" : "OFF", windDirectionField_ ? "ON" : "OFF",
         lastWindStrengthField_ ? "ON" : "OFF", windStrengthField_ ? "ON" : "OFF",
+        lastGameplayRain_, gameplayRain_,
+        lastGraphicsRain_, graphicsRain_,
+        lastTemperature_, temperature_,
+        lastViewDistance_, viewDistance_,
+        lastOutdoorFog_, outdoorFog_,
+        lastCloudCoverage_, cloudCoverage_,
+        lastWindDirection_, windDirection_,
+        lastWindStrength_, windStrength_,
         lastHasSnow_ ? "ON" : "OFF", hasSnow_ ? "ON" : "OFF",
         lastHasFog_ ? "ON" : "OFF", hasFog_ ? "ON" : "OFF",
         lastPaused_ ? "ON" : "OFF", timePaused_ ? "ON" : "OFF");
@@ -400,6 +444,29 @@ void EnvironmentInspector::paint(HDC dc, const RECT& client) noexcept {
             statusColor(weatherAvailable_, temperatureField_));
     drawRow(dc, y, 24, client.right - 24, L"View Distance", onOff(viewDistanceField_),
             statusColor(weatherAvailable_, viewDistanceField_));
+
+    wchar_t number[64]{};
+    y += 10;
+    drawSection(dc, y, 24, client.right - 24, L"ACTIVE PRESET VALUES");
+
+    auto drawFloat = [&](const wchar_t* label, float value, bool present) {
+        if (present) {
+            std::swprintf(number, std::size(number), L"%.4f", value);
+        } else {
+            wcscpy_s(number, L"N/A");
+        }
+        drawRow(dc, y, 24, client.right - 24, label, number,
+                present ? RGB(112,190,255) : RGB(145,145,155));
+    };
+
+    drawFloat(L"Gameplay Rain", gameplayRain_, gameplayRainField_);
+    drawFloat(L"Graphics Rain", graphicsRain_, graphicsRainField_);
+    drawFloat(L"Temperature", temperature_, temperatureField_);
+    drawFloat(L"View Distance", viewDistance_, viewDistanceField_);
+    drawFloat(L"Outdoor Fog", outdoorFog_, outdoorFogField_);
+    drawFloat(L"Cloud Coverage", cloudCoverage_, cloudCoverageField_);
+    drawFloat(L"Wind Direction", windDirection_, windDirectionField_);
+    drawFloat(L"Wind Strength", windStrength_, windStrengthField_);
 
     y += 10;
     drawSection(dc, y, 24, client.right - 24, L"WEATHER FLAGS");
