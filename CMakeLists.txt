@@ -12,6 +12,7 @@ add_library(OutlawsTools SHARED
     src/EnvironmentRegistry.cpp
     src/LightSystem.cpp
     src/EnvironmentSystem.cpp
+    src/EnvironmentInspector.cpp
     src/PostProcessSystem.cpp
 )
 
@@ -20,3 +21,5 @@ target_compile_definitions(OutlawsTools PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 if(MSVC)
     target_compile_options(OutlawsTools PRIVATE /W4 /permissive-)
 endif()
+
+target_link_libraries(OutlawsTools PRIVATE user32 gdi32)
