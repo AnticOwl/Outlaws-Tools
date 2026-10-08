@@ -1,21 +1,21 @@
 #include "EnvironmentInspector.h"
 #include "EnvironmentSystem.h"
 
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx11.h>
+
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
-#include <cwchar>
-#include <iterator>
 #include <filesystem>
 #include <fstream>
-#include <string>
+#include <iterator>
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace outlaws {
 namespace {
-constexpr UINT_PTR kTimerId = 1;
-constexpr int kBtn0600 = 1001;
-constexpr int kBtn1200 = 1002;
-constexpr int kBtn1800 = 1003;
-constexpr int kBtnPause = 1004;
-constexpr int kBtnResume = 1005;
 
 std::filesystem::path logPath() {
     wchar_t buffer[MAX_PATH]{};
@@ -26,14 +26,40 @@ std::filesystem::path logPath() {
     return p;
 }
 
-COLORREF statusColor(bool known, bool on) {
-    if (!known) return RGB(145, 145, 155);
-    return on ? RGB(88, 210, 130) : RGB(235, 105, 105);
+bool floatChanged(float a, float b) noexcept {
+    if (!std::isfinite(a) || !std::isfinite(b)) return a != b;
+    return std::fabs(a - b) > 0.0001f;
 }
 
-const wchar_t* onOff(bool value) {
-    return value ? L"ON" : L"OFF";
+void statusText(const char* label, bool value, bool available = true) {
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(250.0f);
+    if (!available) {
+        ImGui::TextDisabled("N/A");
+        return;
+    }
+    const ImVec4 color = value ? ImVec4(0.35f, 0.90f, 0.52f, 1.0f)
+                               : ImVec4(0.95f, 0.38f, 0.38f, 1.0f);
+    ImGui::TextColored(color, "%s", value ? "ON" : "OFF");
 }
+
+void floatRow(const char* label, float value, bool available) {
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(250.0f);
+    if (available && std::isfinite(value)) {
+        ImGui::Text("%.4f", value);
+    } else {
+        ImGui::TextDisabled("N/A");
+    }
+}
+
+void pointerRow(const char* label, std::uintptr_t value) {
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(250.0f);
+    if (value) ImGui::Text("0x%llX", static_cast<unsigned long long>(value));
+    else ImGui::TextDisabled("N/A");
+}
+
 }
 
 bool EnvironmentInspector::start(EnvironmentSystem* environment, std::uintptr_t moduleBase) noexcept {
@@ -53,7 +79,7 @@ void EnvironmentInspector::stop() noexcept {
     if (!running_.exchange(false)) return;
     if (hwnd_) PostMessageW(hwnd_, WM_CLOSE, 0, 0);
     if (thread_) {
-        WaitForSingleObject(thread_, 1500);
+        WaitForSingleObject(thread_, 3000);
         CloseHandle(thread_);
         thread_ = nullptr;
     }
@@ -80,11 +106,59 @@ DWORD WINAPI EnvironmentInspector::threadProc(LPVOID param) {
         return 0;
     }
 
-    MSG msg{};
-    while (self->running_.load() && GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.IniFilename = nullptr;
+
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 8.0f;
+    style.FrameRounding = 5.0f;
+    style.ChildRounding = 6.0f;
+    style.PopupRounding = 5.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.TabRounding = 5.0f;
+    style.WindowPadding = ImVec2(12.0f, 12.0f);
+    style.ItemSpacing = ImVec2(8.0f, 6.0f);
+
+    ImGui_ImplWin32_Init(self->hwnd_);
+    ImGui_ImplDX11_Init(self->device_, self->deviceContext_);
+
+    self->appendLog("Environment Monitor ImGui started");
+    self->sample();
+
+    ULONGLONG lastSample = GetTickCount64();
+
+    while (self->running_.load()) {
+        MSG msg{};
+        while (PeekMessageW(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            if (msg.message == WM_QUIT) {
+                self->running_ = false;
+                break;
+            }
+        }
+        if (!self->running_.load()) break;
+
+        const ULONGLONG now = GetTickCount64();
+        if (now - lastSample >= 250) {
+            self->sample();
+            lastSample = now;
+        }
+
+        if (!self->visible_.load()) {
+            Sleep(50);
+            continue;
+        }
+
+        self->renderFrame();
     }
+
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
 
     self->destroyWindow();
     return 0;
@@ -95,76 +169,109 @@ bool EnvironmentInspector::createWindow() noexcept {
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
+    wc.style = CS_CLASSDC;
     wc.lpfnWndProc = &EnvironmentInspector::wndProc;
     wc.hInstance = instance;
-    wc.lpszClassName = L"OutlawsEnvironmentInspector";
-    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-    wc.hbrBackground = CreateSolidBrush(RGB(19, 20, 24));
-    RegisterClassExW(&wc);
+    wc.lpszClassName = L"OutlawsEnvironmentInspectorImGui";
+
+    if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        return false;
 
     hwnd_ = CreateWindowExW(
         WS_EX_TOOLWINDOW,
         wc.lpszClassName,
-        L"Outlaws Tools - Environment Monitor",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        80, 80, 760, 1060,
+        L"Outlaws Tools - Environment Inspector",
+        WS_OVERLAPPEDWINDOW,
+        80, 80, 760, 820,
         nullptr, nullptr, instance, this);
 
     if (!hwnd_) return false;
-
-    font_ = CreateFontW(
-        -17, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-    fontBold_ = CreateFontW(
-        -19, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-
-    const struct ButtonDef { int id; int x; int w; const wchar_t* text; } buttons[] = {
-        {kBtn0600, 24, 104, L"06:00"},
-        {kBtn1200, 136, 104, L"12:00"},
-        {kBtn1800, 248, 104, L"18:00"},
-        {kBtnPause, 374, 120, L"Pause TOD"},
-        {kBtnResume, 502, 140, L"Resume TOD"},
-    };
-
-    for (const auto& b : buttons) {
-        HWND h = CreateWindowW(L"BUTTON", b.text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                               b.x, 926, b.w, 32, hwnd_,
-                               reinterpret_cast<HMENU>(static_cast<INT_PTR>(b.id)),
-                               instance, nullptr);
-        if (h && font_) SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    if (!createDeviceD3D(hwnd_)) {
+        DestroyWindow(hwnd_);
+        hwnd_ = nullptr;
+        return false;
     }
 
-    SetTimer(hwnd_, kTimerId, 250, nullptr);
-    sample();
-    appendLog("Environment Monitor started");
-
-    ShowWindow(hwnd_, SW_SHOW);
+    ShowWindow(hwnd_, SW_SHOWDEFAULT);
     UpdateWindow(hwnd_);
     return true;
 }
 
 void EnvironmentInspector::destroyWindow() noexcept {
+    cleanupDeviceD3D();
     if (hwnd_) {
-        KillTimer(hwnd_, kTimerId);
+        DestroyWindow(hwnd_);
         hwnd_ = nullptr;
     }
-    if (font_) {
-        DeleteObject(font_);
-        font_ = nullptr;
+    UnregisterClassW(L"OutlawsEnvironmentInspectorImGui", GetModuleHandleW(nullptr));
+}
+
+bool EnvironmentInspector::createDeviceD3D(HWND hwnd) noexcept {
+    DXGI_SWAP_CHAIN_DESC sd{};
+    sd.BufferCount = 2;
+    sd.BufferDesc.Width = 0;
+    sd.BufferDesc.Height = 0;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = hwnd;
+    sd.SampleDesc.Count = 1;
+    sd.SampleDesc.Quality = 0;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    const D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_0
+    };
+    D3D_FEATURE_LEVEL featureLevel{};
+
+    const HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr,
+        D3D_DRIVER_TYPE_HARDWARE,
+        nullptr,
+        0,
+        featureLevels,
+        static_cast<UINT>(std::size(featureLevels)),
+        D3D11_SDK_VERSION,
+        &sd,
+        &swapChain_,
+        &device_,
+        &featureLevel,
+        &deviceContext_);
+
+    if (FAILED(hr)) return false;
+    createRenderTarget();
+    return renderTargetView_ != nullptr;
+}
+
+void EnvironmentInspector::cleanupDeviceD3D() noexcept {
+    cleanupRenderTarget();
+    if (swapChain_) { swapChain_->Release(); swapChain_ = nullptr; }
+    if (deviceContext_) { deviceContext_->Release(); deviceContext_ = nullptr; }
+    if (device_) { device_->Release(); device_ = nullptr; }
+}
+
+void EnvironmentInspector::createRenderTarget() noexcept {
+    if (!swapChain_ || !device_) return;
+    ID3D11Texture2D* backBuffer = nullptr;
+    if (SUCCEEDED(swapChain_->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) && backBuffer) {
+        device_->CreateRenderTargetView(backBuffer, nullptr, &renderTargetView_);
+        backBuffer->Release();
     }
-    if (fontBold_) {
-        DeleteObject(fontBold_);
-        fontBold_ = nullptr;
+}
+
+void EnvironmentInspector::cleanupRenderTarget() noexcept {
+    if (renderTargetView_) {
+        renderTargetView_->Release();
+        renderTargetView_ = nullptr;
     }
 }
 
 LRESULT CALLBACK EnvironmentInspector::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    EnvironmentInspector* self = reinterpret_cast<EnvironmentInspector*>(
-        GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto* self = reinterpret_cast<EnvironmentInspector*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 
     if (msg == WM_NCCREATE) {
         const auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
@@ -172,40 +279,28 @@ LRESULT CALLBACK EnvironmentInspector::wndProc(HWND hwnd, UINT msg, WPARAM wPara
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
 
+    if (ImGui::GetCurrentContext() && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+        return true;
+
     switch (msg) {
-    case WM_TIMER:
-        if (self && wParam == kTimerId) {
-            self->sample();
-            InvalidateRect(hwnd, nullptr, FALSE);
+    case WM_SIZE:
+        if (self && self->device_ && wParam != SIZE_MINIMIZED) {
+            self->cleanupRenderTarget();
+            if (self->swapChain_) {
+                self->swapChain_->ResizeBuffers(
+                    0,
+                    static_cast<UINT>(LOWORD(lParam)),
+                    static_cast<UINT>(HIWORD(lParam)),
+                    DXGI_FORMAT_UNKNOWN,
+                    0);
+                self->createRenderTarget();
+            }
         }
         return 0;
 
-    case WM_COMMAND:
-        if (!self || !self->environment_) return 0;
-        switch (LOWORD(wParam)) {
-        case kBtn0600: self->environment_->setTimeOfDay(6.0f); break;
-        case kBtn1200: self->environment_->setTimeOfDay(12.0f); break;
-        case kBtn1800: self->environment_->setTimeOfDay(18.0f); break;
-        case kBtnPause: self->environment_->setTimePaused(true); break;
-        case kBtnResume: self->environment_->setTimePaused(false); break;
-        default: break;
-        }
-        return 0;
-
-    case WM_PAINT:
-        if (self) {
-            PAINTSTRUCT ps{};
-            HDC dc = BeginPaint(hwnd, &ps);
-            RECT client{};
-            GetClientRect(hwnd, &client);
-            self->paint(dc, client);
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
+    case WM_SYSCOMMAND:
+        if ((wParam & 0xFFF0) == SC_KEYMENU) return 0;
         break;
-
-    case WM_ERASEBKGND:
-        return 1;
 
     case WM_CLOSE:
         if (self) {
@@ -230,6 +325,24 @@ LRESULT CALLBACK EnvironmentInspector::wndProc(HWND hwnd, UINT msg, WPARAM wPara
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+void EnvironmentInspector::renderFrame() noexcept {
+    if (!deviceContext_ || !swapChain_ || !renderTargetView_) return;
+
+    ImGui_ImplDX11_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
+    drawUi();
+
+    ImGui::Render();
+    const float clearColor[4] = {0.055f, 0.060f, 0.075f, 1.0f};
+    deviceContext_->OMSetRenderTargets(1, &renderTargetView_, nullptr);
+    deviceContext_->ClearRenderTargetView(renderTargetView_, clearColor);
+    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+
+    swapChain_->Present(1, 0);
+}
+
 void EnvironmentInspector::sample() noexcept {
     if (!environment_) return;
 
@@ -241,7 +354,9 @@ void EnvironmentInspector::sample() noexcept {
     }
 
     WeatherSceneState weather{};
-    weatherAvailable_ = environment_->readWeatherScene(weather);
+    const bool readOk = environment_->readWeatherScene(weather);
+    weatherAvailable_ = readOk && weather.available;
+
     if (weatherAvailable_) {
         weatherManager_ = weather.manager;
         weatherPreset_ = weather.preset;
@@ -267,6 +382,10 @@ void EnvironmentInspector::sample() noexcept {
 
         hasSnow_ = weather.hasSnow;
         hasFog_ = weather.hasFog;
+    } else {
+        weatherManager_ = 0;
+        weatherPreset_ = 0;
+        activePresetIndex_ = -1;
     }
 
     if (!firstSample_) {
@@ -282,20 +401,19 @@ void EnvironmentInspector::sample() noexcept {
             lastCloudCoverageField_ != cloudCoverageField_ ||
             lastWindDirectionField_ != windDirectionField_ ||
             lastWindStrengthField_ != windStrengthField_ ||
-            lastGameplayRain_ != gameplayRain_ ||
-            lastGraphicsRain_ != graphicsRain_ ||
-            lastTemperature_ != temperature_ ||
-            lastViewDistance_ != viewDistance_ ||
-            lastOutdoorFog_ != outdoorFog_ ||
-            lastCloudCoverage_ != cloudCoverage_ ||
-            lastWindDirection_ != windDirection_ ||
-            lastWindStrength_ != windStrength_ ||
+            floatChanged(lastGameplayRain_, gameplayRain_) ||
+            floatChanged(lastGraphicsRain_, graphicsRain_) ||
+            floatChanged(lastTemperature_, temperature_) ||
+            floatChanged(lastViewDistance_, viewDistance_) ||
+            floatChanged(lastOutdoorFog_, outdoorFog_) ||
+            floatChanged(lastCloudCoverage_, cloudCoverage_) ||
+            floatChanged(lastWindDirection_, windDirection_) ||
+            floatChanged(lastWindStrength_, windStrength_) ||
             lastHasSnow_ != hasSnow_ ||
             lastHasFog_ != hasFog_;
 
-        if (weatherChanged || (todAvailable_ && lastPaused_ != timePaused_)) {
+        if (weatherChanged || (todAvailable_ && lastPaused_ != timePaused_))
             logSceneChange();
-        }
     }
 
     lastWeatherManager_ = weatherManager_;
@@ -326,7 +444,7 @@ void EnvironmentInspector::sample() noexcept {
 }
 
 void EnvironmentInspector::logSceneChange() noexcept {
-    char line[2048]{};
+    char line[3072]{};
     std::snprintf(line, sizeof(line),
         "=== ENVIRONMENT CHANGE ===\n"
         "WeatherManager: 0x%llX -> 0x%llX\n"
@@ -375,178 +493,142 @@ void EnvironmentInspector::logSceneChange() noexcept {
         lastHasSnow_ ? "ON" : "OFF", hasSnow_ ? "ON" : "OFF",
         lastHasFog_ ? "ON" : "OFF", hasFog_ ? "ON" : "OFF",
         lastPaused_ ? "ON" : "OFF", timePaused_ ? "ON" : "OFF");
+
     appendLog(line);
 }
 
-void EnvironmentInspector::paint(HDC dc, const RECT& client) noexcept {
-    HBRUSH bg = CreateSolidBrush(RGB(19, 20, 24));
-    FillRect(dc, &client, bg);
-    DeleteObject(bg);
+void EnvironmentInspector::drawUi() noexcept {
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
 
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(238, 238, 244));
+    constexpr ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings;
 
-    RECT title{24, 18, client.right - 24, 52};
-    SelectObject(dc, fontBold_);
-    DrawTextW(dc, L"Environment Monitor", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    ImGui::Begin("Environment Inspector", nullptr, flags);
 
-    RECT sub{24, 48, client.right - 24, 76};
-    SelectObject(dc, font_);
-    SetTextColor(dc, RGB(145, 148, 162));
-    DrawTextW(dc, L"Active-scene WeatherPreset observer — F10 toggles this window",
-              -1, &sub, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    ImGui::TextColored(ImVec4(0.50f, 0.78f, 1.0f, 1.0f), "Outlaws Tools");
+    ImGui::SameLine();
+    ImGui::TextDisabled(" / Scene-aware Environment Monitor");
+    ImGui::Separator();
 
-    int y = 88;
+    if (ImGui::BeginTabBar("EnvironmentTabs")) {
+        if (ImGui::BeginTabItem("Environment")) {
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Active Scene / WeatherPreset");
+            ImGui::Separator();
+            pointerRow("Weather Manager", weatherManager_);
+            pointerRow("Weather Preset", weatherPreset_);
+            ImGui::Text("Preset / Transition Index");
+            ImGui::SameLine(250.0f);
+            if (weatherAvailable_) ImGui::Text("%d", activePresetIndex_);
+            else ImGui::TextDisabled("N/A");
 
-    drawSection(dc, y, 24, client.right - 24, L"ACTIVE SCENE / PRESET");
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Preset contributions");
+            ImGui::Separator();
+            statusText("Gameplay Rain field", gameplayRainField_, weatherAvailable_);
+            statusText("Graphics Rain field", graphicsRainField_, weatherAvailable_);
+            statusText("Temperature field", temperatureField_, weatherAvailable_);
+            statusText("View Distance field", viewDistanceField_, weatherAvailable_);
+            statusText("Outdoor Fog field", outdoorFogField_, weatherAvailable_);
+            statusText("Cloud Coverage field", cloudCoverageField_, weatherAvailable_);
+            statusText("Wind Direction field", windDirectionField_, weatherAvailable_);
+            statusText("Wind Strength field", windStrengthField_, weatherAvailable_);
 
-    wchar_t managerText[64]{};
-    wchar_t presetText[64]{};
-    wchar_t indexText[64]{};
-    if (weatherAvailable_) {
-        std::swprintf(managerText, std::size(managerText), L"0x%llX",
-                      static_cast<unsigned long long>(weatherManager_));
-        if (weatherPreset_) {
-            std::swprintf(presetText, std::size(presetText), L"0x%llX",
-                          static_cast<unsigned long long>(weatherPreset_));
-        } else {
-            wcscpy_s(presetText, L"NONE / TRANSITION");
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Active preset values");
+            ImGui::Separator();
+            floatRow("Gameplay Rain", gameplayRain_, weatherAvailable_ && gameplayRainField_);
+            floatRow("Graphics Rain", graphicsRain_, weatherAvailable_ && graphicsRainField_);
+            floatRow("Temperature", temperature_, weatherAvailable_ && temperatureField_);
+            floatRow("View Distance", viewDistance_, weatherAvailable_ && viewDistanceField_);
+            floatRow("Outdoor Fog", outdoorFog_, weatherAvailable_ && outdoorFogField_);
+            floatRow("Cloud Coverage", cloudCoverage_, weatherAvailable_ && cloudCoverageField_);
+            floatRow("Wind Direction", windDirection_, weatherAvailable_ && windDirectionField_);
+            floatRow("Wind Strength", windStrength_, weatherAvailable_ && windStrengthField_);
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Weather flags");
+            ImGui::Separator();
+            statusText("Snow", hasSnow_, weatherAvailable_);
+            statusText("Fog", hasFog_, weatherAvailable_);
+
+            ImGui::TextUnformatted("Indoor / Outdoor");
+            ImGui::SameLine(250.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.30f, 1.0f), "PENDING NATIVE PROBE");
+
+            ImGui::TextUnformatted("Weather Mask Wetness");
+            ImGui::SameLine(250.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.30f, 1.0f), "PENDING NATIVE PROBE");
+
+            ImGui::TextUnformatted("Sandstorm Tag");
+            ImGui::SameLine(250.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.30f, 1.0f), "PENDING NATIVE PROBE");
+
+            ImGui::EndTabItem();
         }
-        std::swprintf(indexText, std::size(indexText), L"%d", activePresetIndex_);
-    } else {
-        wcscpy_s(managerText, L"UNAVAILABLE");
-        wcscpy_s(presetText, L"UNAVAILABLE");
-        wcscpy_s(indexText, L"UNAVAILABLE");
+
+        if (ImGui::BeginTabItem("Time of Day")) {
+            ImGui::Spacing();
+            if (todAvailable_) {
+                int totalSeconds = static_cast<int>(timeOfDay_ * 3600.0f);
+                totalSeconds = std::max(0, totalSeconds);
+                const int hh = (totalSeconds / 3600) % 24;
+                const int mm = (totalSeconds / 60) % 60;
+                const int ss = totalSeconds % 60;
+                ImGui::Text("Current Time: %02d:%02d:%02d", hh, mm, ss);
+                statusText("Paused", timePaused_, true);
+            } else {
+                ImGui::TextDisabled("TimeOfDaySystem unavailable.");
+            }
+
+            ImGui::Spacing();
+            if (ImGui::Button("06:00", ImVec2(110, 34)) && environment_)
+                environment_->setTimeOfDay(6.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("12:00", ImVec2(110, 34)) && environment_)
+                environment_->setTimeOfDay(12.0f);
+            ImGui::SameLine();
+            if (ImGui::Button("18:00", ImVec2(110, 34)) && environment_)
+                environment_->setTimeOfDay(18.0f);
+
+            if (ImGui::Button("Pause TOD", ImVec2(170, 34)) && environment_)
+                environment_->setTimePaused(true);
+            ImGui::SameLine();
+            if (ImGui::Button("Resume TOD", ImVec2(170, 34)) && environment_)
+                environment_->setTimePaused(false);
+
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Diagnostics")) {
+            ImGui::Spacing();
+            pointerRow("Module Base", moduleBase_);
+            pointerRow("Weather Manager", weatherManager_);
+            pointerRow("Weather Preset", weatherPreset_);
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.35f, 0.90f, 0.52f, 1.0f),
+                               "Scene-change logger: ACTIVE");
+            ImGui::TextColored(ImVec4(0.35f, 0.90f, 0.52f, 1.0f),
+                               "Unsafe descriptor writes: DISABLED");
+            ImGui::TextWrapped(
+                "Sampling runs every 250 ms. The log only emits an ENVIRONMENT CHANGE "
+                "block when the observed manager, preset, contribution flags, numeric "
+                "preset values, weather flags, or TOD pause state changes.");
+            ImGui::Spacing();
+            ImGui::TextDisabled(
+                "F10 toggles this inspector. Pending probes are deliberately not guessed.");
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
     }
 
-    drawRow(dc, y, 24, client.right - 24, L"Weather Manager", managerText,
-            weatherAvailable_ ? RGB(112,190,255) : RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Active Weather Preset", presetText,
-            weatherPreset_ ? RGB(112,190,255) : RGB(245,190,90));
-    drawRow(dc, y, 24, client.right - 24, L"Preset / Transition Index", indexText,
-            weatherAvailable_ ? RGB(190,190,205) : RGB(145,145,155));
-
-    y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"WEATHER PRESET CONTRIBUTIONS");
-    drawRow(dc, y, 24, client.right - 24, L"Gameplay Rain", onOff(gameplayRainField_),
-            statusColor(weatherAvailable_, gameplayRainField_));
-    drawRow(dc, y, 24, client.right - 24, L"Graphics Rain", onOff(graphicsRainField_),
-            statusColor(weatherAvailable_, graphicsRainField_));
-    drawRow(dc, y, 24, client.right - 24, L"Outdoor Fog", onOff(outdoorFogField_),
-            statusColor(weatherAvailable_, outdoorFogField_));
-    drawRow(dc, y, 24, client.right - 24, L"Cloud Coverage", onOff(cloudCoverageField_),
-            statusColor(weatherAvailable_, cloudCoverageField_));
-    drawRow(dc, y, 24, client.right - 24, L"Wind Direction", onOff(windDirectionField_),
-            statusColor(weatherAvailable_, windDirectionField_));
-    drawRow(dc, y, 24, client.right - 24, L"Wind Strength", onOff(windStrengthField_),
-            statusColor(weatherAvailable_, windStrengthField_));
-    drawRow(dc, y, 24, client.right - 24, L"Temperature", onOff(temperatureField_),
-            statusColor(weatherAvailable_, temperatureField_));
-    drawRow(dc, y, 24, client.right - 24, L"View Distance", onOff(viewDistanceField_),
-            statusColor(weatherAvailable_, viewDistanceField_));
-
-    wchar_t number[64]{};
-    y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"ACTIVE PRESET VALUES");
-
-    auto drawFloat = [&](const wchar_t* label, float value, bool present) {
-        if (present) {
-            std::swprintf(number, std::size(number), L"%.4f", value);
-        } else {
-            wcscpy_s(number, L"N/A");
-        }
-        drawRow(dc, y, 24, client.right - 24, label, number,
-                present ? RGB(112,190,255) : RGB(145,145,155));
-    };
-
-    drawFloat(L"Gameplay Rain", gameplayRain_, gameplayRainField_);
-    drawFloat(L"Graphics Rain", graphicsRain_, graphicsRainField_);
-    drawFloat(L"Temperature", temperature_, temperatureField_);
-    drawFloat(L"View Distance", viewDistance_, viewDistanceField_);
-    drawFloat(L"Outdoor Fog", outdoorFog_, outdoorFogField_);
-    drawFloat(L"Cloud Coverage", cloudCoverage_, cloudCoverageField_);
-    drawFloat(L"Wind Direction", windDirection_, windDirectionField_);
-    drawFloat(L"Wind Strength", windStrength_, windStrengthField_);
-
-    y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"WEATHER FLAGS");
-    drawRow(dc, y, 24, client.right - 24, L"Snow", onOff(hasSnow_),
-            statusColor(weatherAvailable_, hasSnow_));
-    drawRow(dc, y, 24, client.right - 24, L"Fog", onOff(hasFog_),
-            statusColor(weatherAvailable_, hasFog_));
-    drawRow(dc, y, 24, client.right - 24, L"Indoor / Outdoor", L"PENDING NATIVE PROBE",
-            RGB(245,190,90));
-    drawRow(dc, y, 24, client.right - 24, L"Weather Mask Wetness", L"PENDING NATIVE PROBE",
-            RGB(245,190,90));
-    drawRow(dc, y, 24, client.right - 24, L"Sandstorm Tag", L"PENDING NATIVE PROBE",
-            RGB(245,190,90));
-
-    y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"TIME OF DAY");
-
-    wchar_t timeText[64]{};
-    if (todAvailable_) {
-        int totalSeconds = static_cast<int>(timeOfDay_ * 3600.0f);
-        if (totalSeconds < 0) totalSeconds = 0;
-        const int hh = (totalSeconds / 3600) % 24;
-        const int mm = (totalSeconds / 60) % 60;
-        const int ss = totalSeconds % 60;
-        std::swprintf(timeText, std::size(timeText), L"%02d:%02d:%02d", hh, mm, ss);
-    } else {
-        wcscpy_s(timeText, L"UNAVAILABLE");
-    }
-
-    drawRow(dc, y, 24, client.right - 24, L"Current Time", timeText,
-            todAvailable_ ? RGB(112,190,255) : RGB(145,145,155));
-    drawRow(dc, y, 24, client.right - 24, L"Paused",
-            todAvailable_ ? onOff(timePaused_) : L"UNAVAILABLE",
-            statusColor(todAvailable_, timePaused_));
-
-    y += 10;
-    drawSection(dc, y, 24, client.right - 24, L"STATUS");
-    drawRow(dc, y, 24, client.right - 24, L"Scene-change logger", L"ACTIVE",
-            RGB(88,210,130));
-    drawRow(dc, y, 24, client.right - 24, L"Unsafe descriptor writes", L"DISABLED",
-            RGB(88,210,130));
-
-    RECT foot{24, client.bottom - 58, client.right - 24, client.bottom - 16};
-    SelectObject(dc, font_);
-    SetTextColor(dc, RGB(120,123,136));
-    DrawTextW(dc,
-              L"Only verified scene data is displayed as live. Pending probes are explicitly marked.",
-              -1, &foot, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-}
-
-void EnvironmentInspector::drawSection(HDC dc, int& y, int left, int right, const wchar_t* title) noexcept {
-    RECT r{left, y, right, y + 28};
-    HBRUSH brush = CreateSolidBrush(RGB(29, 31, 38));
-    FillRect(dc, &r, brush);
-    DeleteObject(brush);
-
-    SelectObject(dc, fontBold_);
-    SetTextColor(dc, RGB(214, 216, 226));
-    RECT t{left + 10, y, right - 10, y + 28};
-    DrawTextW(dc, title, -1, &t, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    y += 30;
-}
-
-void EnvironmentInspector::drawRow(HDC dc, int& y, int left, int right,
-                                   const wchar_t* label, const wchar_t* value,
-                                   COLORREF valueColor) noexcept {
-    RECT r{left, y, right, y + 25};
-    HBRUSH brush = CreateSolidBrush((y / 25) % 2 ? RGB(23,24,29) : RGB(25,26,31));
-    FillRect(dc, &r, brush);
-    DeleteObject(brush);
-
-    SelectObject(dc, font_);
-    SetTextColor(dc, RGB(177,180,192));
-    RECT l{left + 10, y, left + 330, y + 25};
-    DrawTextW(dc, label, -1, &l, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-    SetTextColor(dc, valueColor);
-    RECT v{left + 340, y, right - 10, y + 25};
-    DrawTextW(dc, value, -1, &v, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-    y += 25;
+    ImGui::End();
 }
 
 void EnvironmentInspector::appendLog(const char* text) const noexcept {
