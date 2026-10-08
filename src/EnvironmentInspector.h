@@ -1,5 +1,6 @@
 #pragma once
 #include <Windows.h>
+#include <d3d11.h>
 #include <atomic>
 #include <cstdint>
 
@@ -22,14 +23,16 @@ private:
 
     bool createWindow() noexcept;
     void destroyWindow() noexcept;
+    bool createDeviceD3D(HWND hwnd) noexcept;
+    void cleanupDeviceD3D() noexcept;
+    void createRenderTarget() noexcept;
+    void cleanupRenderTarget() noexcept;
+    void renderFrame() noexcept;
+
     void sample() noexcept;
-    void paint(HDC dc, const RECT& client) noexcept;
+    void drawUi() noexcept;
     void appendLog(const char* text) const noexcept;
     void logSceneChange() noexcept;
-
-    void drawSection(HDC dc, int& y, int left, int right, const wchar_t* title) noexcept;
-    void drawRow(HDC dc, int& y, int left, int right, const wchar_t* label,
-                 const wchar_t* value, COLORREF valueColor) noexcept;
 
     EnvironmentSystem* environment_{};
     std::uintptr_t moduleBase_{};
@@ -38,8 +41,11 @@ private:
     std::atomic_bool visible_{true};
     HANDLE thread_{};
     HWND hwnd_{};
-    HFONT font_{};
-    HFONT fontBold_{};
+
+    ID3D11Device* device_{};
+    ID3D11DeviceContext* deviceContext_{};
+    IDXGISwapChain* swapChain_{};
+    ID3D11RenderTargetView* renderTargetView_{};
 
     float timeOfDay_{};
     bool timePaused_{};
@@ -58,6 +64,7 @@ private:
     bool cloudCoverageField_{};
     bool windDirectionField_{};
     bool windStrengthField_{};
+
     float gameplayRain_{};
     float graphicsRain_{};
     float temperature_{};
@@ -83,6 +90,7 @@ private:
     bool lastCloudCoverageField_{};
     bool lastWindDirectionField_{};
     bool lastWindStrengthField_{};
+
     float lastGameplayRain_{};
     float lastGraphicsRain_{};
     float lastTemperature_{};
