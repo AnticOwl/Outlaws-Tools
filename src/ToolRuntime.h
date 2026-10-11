@@ -3,6 +3,7 @@
 #include "LightSystem.h"
 #include "EnvironmentSystem.h"
 #include "EnvironmentInspector.h"
+#include "Dx12Overlay.h"
 #include "PostProcessSystem.h"
 #include <atomic>
 
@@ -18,6 +19,7 @@ public:
     LightSystem lights;
     EnvironmentSystem environment;
     EnvironmentInspector inspector;
+    Dx12Overlay overlay;
     PostProcessSystem post;
 private:
     std::atomic_bool m_running{};
