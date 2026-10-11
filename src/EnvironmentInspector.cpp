@@ -47,9 +47,62 @@ void ptrRow(const char* label, std::uintptr_t value) {
         ImGui::TextDisabled("N/A");
 }
 
-bool byteBlockChanged(const std::array<std::uint8_t, 0x2C0>& a,
-                      const std::array<std::uint8_t, 0x2C0>& b) {
+template <std::size_t N>
+bool byteBlockChanged(const std::array<std::uint8_t, N>& a,
+                      const std::array<std::uint8_t, N>& b) {
     return std::memcmp(a.data(), b.data(), a.size()) != 0;
+}
+
+template <std::size_t N>
+void dumpRawDwords(std::ofstream& log,
+                   const char* label,
+                   const std::array<std::uint8_t, N>& bytes) {
+    log << "-- " << label << " RAW " << std::dec << N << " bytes --\n";
+    for (std::size_t off = 0; off + 4 <= N; off += 4) {
+        std::uint32_t raw{};
+        std::memcpy(&raw, bytes.data() + off, sizeof(raw));
+        const float f = std::bit_cast<float>(raw);
+
+        log << "+0x" << std::hex << std::uppercase
+            << std::setw(3) << std::setfill('0') << off
+            << " raw=0x" << std::setw(8) << raw
+            << std::setfill(' ') << std::dec;
+
+        if (std::isfinite(f) && std::fabs(f) < 1000000.0f)
+            log << " float=" << f;
+        log << "\n";
+    }
+}
+
+template <std::size_t N>
+void dumpRawDiff(std::ofstream& log,
+                 const char* label,
+                 const std::array<std::uint8_t, N>& before,
+                 const std::array<std::uint8_t, N>& after) {
+    bool header = false;
+    for (std::size_t off = 0; off + 4 <= N; off += 4) {
+        std::uint32_t a{}, b{};
+        std::memcpy(&a, before.data() + off, sizeof(a));
+        std::memcpy(&b, after.data() + off, sizeof(b));
+        if (a == b) continue;
+
+        if (!header) {
+            log << "-- " << label << " DWORD DIFF --\n";
+            header = true;
+        }
+
+        const float fa = std::bit_cast<float>(a);
+        const float fb = std::bit_cast<float>(b);
+        log << "+0x" << std::hex << std::uppercase
+            << std::setw(3) << std::setfill('0') << off
+            << ": 0x" << std::setw(8) << a
+            << " -> 0x" << std::setw(8) << b
+            << std::setfill(' ') << std::dec;
+        if (std::isfinite(fa) && std::isfinite(fb) &&
+            std::fabs(fa) < 1000000.0f && std::fabs(fb) < 1000000.0f)
+            log << " float " << fa << " -> " << fb;
+        log << "\n";
+    }
 }
 
 }
@@ -120,6 +173,8 @@ void EnvironmentInspector::sample() noexcept {
         precipitationCandidates_ = weather.precipitationCandidates;
         precipitationCandidateCount_ = weather.precipitationCandidateCount;
 
+        managerBytes_ = weather.managerRaw;
+        managerBytesValid_ = weatherManager_ != 0;
         presetBytes_ = weather.presetRaw;
         presetBytesValid_ = weatherPreset_ != 0;
     } else {
@@ -142,15 +197,18 @@ void EnvironmentInspector::sample() noexcept {
         precipitationStateRaw_ = 0.0f;
         precipitationIntensity_ = 0.0f;
         precipitationCandidateCount_ = 0;
+        managerBytesValid_ = false;
         presetBytesValid_ = false;
     }
 
-    if (firstSample_ && presetBytesValid_) {
-        logPresetSnapshot("INITIAL");
+    if (firstSample_) {
+        logFullWeatherSnapshot("INITIAL");
+        if (presetBytesValid_)
+            logPresetSnapshot("INITIAL");
     }
 
     if (!firstSample_) {
-        const bool changed =
+        bool changed =
             lastWeatherManager_ != weatherManager_ ||
             lastWeatherPreset_ != weatherPreset_ ||
             lastActivePresetIndex_ != activePresetIndex_ ||
@@ -170,8 +228,24 @@ void EnvironmentInspector::sample() noexcept {
             lastPrecipitationObject_ != precipitationObject_ ||
             (precipitationAvailable_ && std::fabs(lastPrecipitationStateRaw_ - precipitationStateRaw_) > 0.0001f) ||
             (precipitationAvailable_ && std::fabs(lastPrecipitationIntensity_ - precipitationIntensity_) > 0.0001f) ||
+            precipitationCandidateCount_ != lastPrecipitationCandidateCount_ ||
+            (managerBytesValid_ && lastManagerBytesValid_ &&
+             byteBlockChanged(lastManagerBytes_, managerBytes_)) ||
             (presetBytesValid_ && lastPresetBytesValid_ &&
              byteBlockChanged(lastPresetBytes_, presetBytes_));
+
+        if (!changed && precipitationCandidateCount_ == lastPrecipitationCandidateCount_) {
+            for (std::uint32_t i = 0; i < precipitationCandidateCount_; ++i) {
+                const auto& a = precipitationCandidates_[i];
+                const auto& b = lastPrecipitationCandidates_[i];
+                if (a.ownerOffset != b.ownerOffset || a.object != b.object ||
+                    std::fabs(a.stateRaw - b.stateRaw) > 0.0001f ||
+                    std::fabs(a.intensity - b.intensity) > 0.0001f) {
+                    changed = true;
+                    break;
+                }
+            }
+        }
 
         if (changed)
             logSceneChange();
@@ -197,7 +271,11 @@ void EnvironmentInspector::sample() noexcept {
     lastPrecipitationObject_ = precipitationObject_;
     lastPrecipitationStateRaw_ = precipitationStateRaw_;
     lastPrecipitationIntensity_ = precipitationIntensity_;
+    lastPrecipitationCandidates_ = precipitationCandidates_;
+    lastPrecipitationCandidateCount_ = precipitationCandidateCount_;
 
+    lastManagerBytes_ = managerBytes_;
+    lastManagerBytesValid_ = managerBytesValid_;
     lastPresetBytes_ = presetBytes_;
     lastPresetBytesValid_ = presetBytesValid_;
     firstSample_ = false;
@@ -310,7 +388,70 @@ void EnvironmentInspector::logSceneChange() noexcept {
         }
     }
 
+    if (managerBytesValid_ && lastManagerBytesValid_)
+        dumpRawDiff(log, "WEATHER MANAGER", lastManagerBytes_, managerBytes_);
+    if (presetBytesValid_ && lastPresetBytesValid_)
+        dumpRawDiff(log, "WEATHER PRESET", lastPresetBytes_, presetBytes_);
+
+    log << "-- PRECIPITATION CANDIDATES --\n";
+    log << "count=" << precipitationCandidateCount_ << "\n";
+    for (std::uint32_t i = 0; i < precipitationCandidateCount_; ++i) {
+        const auto& c = precipitationCandidates_[i];
+        log << "[" << i << "] owner=";
+        if (c.ownerOffset == 0xFFFFFFFFu) log << "SELF";
+        else log << "+0x" << std::hex << std::uppercase << c.ownerOffset << std::dec;
+        log << " object=0x" << std::hex << std::uppercase << c.object << std::dec
+            << " state=" << c.stateRaw
+            << " intensity=" << c.intensity << "\n";
+    }
+
     log << "=== END ENVIRONMENT CHANGE ===\n";
+    log.flush();
+
+    // A complete raw snapshot follows every detected change.  This is noisy by
+    // design for the diagnostic build and lets us correlate opaque words with
+    // actual clear/rain/fog/snow transitions.
+    logFullWeatherSnapshot("CHANGE");
+}
+
+
+void EnvironmentInspector::logFullWeatherSnapshot(const char* reason) noexcept {
+    std::ofstream log(logPath(), std::ios::out | std::ios::app);
+    if (!log) return;
+
+    log << "=== FULL WEATHER SNAPSHOT";
+    if (reason && *reason) log << " [" << reason << "]";
+    log << " ===\n";
+    log << std::hex << std::uppercase;
+    log << "ModuleBase: 0x" << moduleBase_ << "\n";
+    log << "WeatherManager: 0x" << weatherManager_ << "\n";
+    log << "WeatherPreset: 0x" << weatherPreset_ << "\n";
+    log << "PrecipitationContext: 0x" << precipitationContext_ << "\n";
+    log << "PrecipitationObject: 0x" << precipitationObject_ << "\n";
+    log << std::dec;
+    log << "PresetIndex: " << activePresetIndex_ << "\n";
+    log << "TOD: " << timeOfDay_ << " paused=" << (timePaused_ ? 1 : 0) << "\n";
+    log << "NativePrecipitationAvailable=" << (precipitationAvailable_ ? 1 : 0)
+        << " state=" << precipitationStateRaw_
+        << " intensity=" << precipitationIntensity_ << "\n";
+
+    if (managerBytesValid_)
+        dumpRawDwords(log, "WEATHER MANAGER", managerBytes_);
+    if (presetBytesValid_)
+        dumpRawDwords(log, "WEATHER PRESET", presetBytes_);
+
+    log << "-- PRECIPITATION CANDIDATES FULL --\n";
+    log << "count=" << precipitationCandidateCount_ << "\n";
+    for (std::uint32_t i = 0; i < precipitationCandidateCount_; ++i) {
+        const auto& c = precipitationCandidates_[i];
+        log << "[" << i << "] owner=";
+        if (c.ownerOffset == 0xFFFFFFFFu) log << "SELF";
+        else log << "+0x" << std::hex << std::uppercase << c.ownerOffset << std::dec;
+        log << " object=0x" << std::hex << std::uppercase << c.object << std::dec
+            << " state=" << c.stateRaw
+            << " intensity=" << c.intensity << "\n";
+    }
+    log << "=== END FULL WEATHER SNAPSHOT ===\n";
     log.flush();
 }
 
@@ -623,15 +764,15 @@ void EnvironmentInspector::drawUi() noexcept {
             ImGui::TextColored(ImVec4(0.30f, 0.90f, 0.48f, 1.0f),
                                "In-game DX12 overlay");
             ImGui::TextColored(ImVec4(0.30f, 0.90f, 0.48f, 1.0f),
-                               "Scene-change logger: ACTIVE");
+                               "Full weather logger: ACTIVE");
             ImGui::TextColored(ImVec4(0.30f, 0.90f, 0.48f, 1.0f),
                                "Unsafe weather writes: DISABLED");
 
             ImGui::Spacing();
             ImGui::TextWrapped(
-                "Sampling interval: 250 ms. Change zone and then planet. "
-                "Only actual scene/preset changes and changed WeatherPreset property words "
-                "are written to OutlawsTools.log.");
+                "Sampling interval: 250 ms. Diagnostic build logs the full 0x360-byte "
+                "WeatherManager, full 0x2C0-byte WeatherPreset, every precipitation candidate, "
+                "plus DWORD diffs whenever any tracked value changes. No weather memory is written.");
 
             ImGui::Spacing();
             ImGui::TextDisabled("F10 toggles the in-game overlay.");
