@@ -1,7 +1,4 @@
 #pragma once
-#include <Windows.h>
-#include <d3d11.h>
-#include <atomic>
 #include <cstdint>
 
 namespace outlaws {
@@ -12,23 +9,9 @@ class EnvironmentInspector {
 public:
     bool start(EnvironmentSystem* environment, std::uintptr_t moduleBase) noexcept;
     void stop() noexcept;
-    void show() noexcept;
-    void hide() noexcept;
-    void toggle() noexcept;
-    [[nodiscard]] bool running() const noexcept { return running_.load(); }
+    void render() noexcept;
 
 private:
-    static DWORD WINAPI threadProc(LPVOID param);
-    static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-    bool createWindow() noexcept;
-    void destroyWindow() noexcept;
-    bool createDeviceD3D(HWND hwnd) noexcept;
-    void cleanupDeviceD3D() noexcept;
-    void createRenderTarget() noexcept;
-    void cleanupRenderTarget() noexcept;
-    void renderFrame() noexcept;
-
     void sample() noexcept;
     void drawUi() noexcept;
     void appendLog(const char* text) const noexcept;
@@ -36,16 +19,8 @@ private:
 
     EnvironmentSystem* environment_{};
     std::uintptr_t moduleBase_{};
-
-    std::atomic_bool running_{};
-    std::atomic_bool visible_{true};
-    HANDLE thread_{};
-    HWND hwnd_{};
-
-    ID3D11Device* device_{};
-    ID3D11DeviceContext* deviceContext_{};
-    IDXGISwapChain* swapChain_{};
-    ID3D11RenderTargetView* renderTargetView_{};
+    bool running_{};
+    std::uint64_t lastSampleTick_{};
 
     float timeOfDay_{};
     bool timePaused_{};
