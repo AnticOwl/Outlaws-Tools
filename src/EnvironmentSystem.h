@@ -15,6 +15,13 @@ struct EnvironmentState {
     float snow{};
 };
 
+struct PrecipitationCandidate {
+    std::uint32_t ownerOffset{};
+    std::uintptr_t object{};
+    float stateRaw{};
+    float intensity{};
+};
+
 struct WeatherSceneState {
     bool available{};
     std::uintptr_t manager{};
@@ -47,6 +54,9 @@ struct WeatherSceneState {
     std::uintptr_t precipitationObject{};
     float precipitationStateRaw{};
     float precipitationIntensity{};
+
+    std::array<PrecipitationCandidate, 12> precipitationCandidates{};
+    std::uint32_t precipitationCandidateCount{};
 
     std::array<std::uint8_t, 0x2C0> presetRaw{};
 };
