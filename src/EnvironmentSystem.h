@@ -55,9 +55,13 @@ struct WeatherSceneState {
     float precipitationStateRaw{};
     float precipitationIntensity{};
 
-    std::array<PrecipitationCandidate, 12> precipitationCandidates{};
+    std::array<PrecipitationCandidate, 64> precipitationCandidates{};
     std::uint32_t precipitationCandidateCount{};
 
+    // Read-only diagnostic snapshots.  These deliberately preserve opaque
+    // Snowdrop state so scene/weather transitions can be diffed without
+    // guessing field semantics or writing to the game.
+    std::array<std::uint8_t, 0x360> managerRaw{};
     std::array<std::uint8_t, 0x2C0> presetRaw{};
 };
 
