@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <cstring>
+#include <limits>
 
 namespace outlaws {
 namespace {
@@ -92,7 +94,7 @@ void* EnvironmentSystem::resolveActiveWeatherPreset(void* manager) const noexcep
 
     if (!source || !readable(source + 0x60, sizeof(std::uintptr_t))) return nullptr;
     const auto preset = *reinterpret_cast<const std::uintptr_t*>(source + 0x60);
-    if (!preset || !readable(preset, 0x2BA)) return nullptr;
+    if (!preset || !readable(preset, 0x2C0)) return nullptr;
     return reinterpret_cast<void*>(preset);
 }
 
@@ -221,14 +223,21 @@ bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept 
     out.windDirectionField  = *reinterpret_cast<const std::uint8_t*>(p + 0x260) != 0;
     out.windStrengthField   = *reinterpret_cast<const std::uint8_t*>(p + 0x2B0) != 0;
 
-    out.gameplayRain  = *reinterpret_cast<const float*>(p + 0x038);
-    out.graphicsRain  = *reinterpret_cast<const float*>(p + 0x088);
-    out.temperature   = *reinterpret_cast<const float*>(p + 0x0D8);
-    out.viewDistance  = *reinterpret_cast<const float*>(p + 0x128);
-    out.outdoorFog    = *reinterpret_cast<const float*>(p + 0x178);
-    out.cloudCoverage = *reinterpret_cast<const float*>(p + 0x1C8);
-    out.windDirection = *reinterpret_cast<const float*>(p + 0x218);
-    out.windStrength  = *reinterpret_cast<const float*>(p + 0x268);
+    // These 0x48-byte blocks are serialized property objects, not plain floats.
+    // Keep the old float members unavailable until their inner value layout is decoded.
+    const float unavailable = std::numeric_limits<float>::quiet_NaN();
+    out.gameplayRain = unavailable;
+    out.graphicsRain = unavailable;
+    out.temperature = unavailable;
+    out.viewDistance = unavailable;
+    out.outdoorFog = unavailable;
+    out.cloudCoverage = unavailable;
+    out.windDirection = unavailable;
+    out.windStrength = unavailable;
+
+    // Raw preset bytes are captured so one zone/planet transition can reveal which
+    // offsets actually change, without guessing or writing into game memory.
+    std::memcpy(out.presetRaw.data(), reinterpret_cast<const void*>(p), out.presetRaw.size());
 
     out.hasSnow = *reinterpret_cast<const std::uint8_t*>(p + 0x2B8) != 0;
     out.hasFog  = *reinterpret_cast<const std::uint8_t*>(p + 0x2B9) != 0;
