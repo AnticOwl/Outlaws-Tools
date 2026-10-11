@@ -65,9 +65,15 @@ bool ToolRuntime::start() {
     writeLine("post disabled for Environment/Weather testing");
 
     if (inspector.start(&environment, bindings.moduleBase)) {
-        writeLine("environment inspector started");
+        writeLine("environment inspector panel initialized");
     } else {
-        writeLine("environment inspector failed");
+        writeLine("environment inspector panel failed");
+    }
+
+    if (overlay.start(&inspector)) {
+        writeLine("dx12 overlay hooks installed");
+    } else {
+        writeLine("dx12 overlay initialization failed");
     }
 
     return true;
@@ -75,6 +81,7 @@ bool ToolRuntime::start() {
 
 void ToolRuntime::stop() {
     if (!m_running.exchange(false)) return;
+    overlay.stop();
     inspector.stop();
     environment.shutdown();
     bindings.shutdown();
