@@ -312,6 +312,9 @@ bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept 
 
     const auto managerAddress = reinterpret_cast<std::uintptr_t>(manager);
     out.manager = managerAddress;
+    std::memcpy(out.managerRaw.data(),
+                reinterpret_cast<const void*>(managerAddress),
+                out.managerRaw.size());
     out.activePresetIndex = *reinterpret_cast<const std::int32_t*>(managerAddress + 0x354);
 
     auto* preset = resolveActiveWeatherPreset(manager);
