@@ -112,6 +112,12 @@ void EnvironmentInspector::sample() noexcept {
         hasSnow_ = weather.hasSnow;
         hasFog_ = weather.hasFog;
 
+        precipitationAvailable_ = weather.precipitationAvailable;
+        precipitationContext_ = weather.precipitationContext;
+        precipitationObject_ = weather.precipitationObject;
+        precipitationStateRaw_ = weather.precipitationStateRaw;
+        precipitationIntensity_ = weather.precipitationIntensity;
+
         presetBytes_ = weather.presetRaw;
         presetBytesValid_ = weatherPreset_ != 0;
     } else {
@@ -128,6 +134,11 @@ void EnvironmentInspector::sample() noexcept {
         windStrengthField_ = false;
         hasSnow_ = false;
         hasFog_ = false;
+        precipitationAvailable_ = false;
+        precipitationContext_ = 0;
+        precipitationObject_ = 0;
+        precipitationStateRaw_ = 0.0f;
+        precipitationIntensity_ = 0.0f;
         presetBytesValid_ = false;
     }
 
@@ -147,6 +158,11 @@ void EnvironmentInspector::sample() noexcept {
             lastHasSnow_ != hasSnow_ ||
             lastHasFog_ != hasFog_ ||
             lastPaused_ != timePaused_ ||
+            lastPrecipitationAvailable_ != precipitationAvailable_ ||
+            lastPrecipitationContext_ != precipitationContext_ ||
+            lastPrecipitationObject_ != precipitationObject_ ||
+            (precipitationAvailable_ && std::fabs(lastPrecipitationStateRaw_ - precipitationStateRaw_) > 0.0001f) ||
+            (precipitationAvailable_ && std::fabs(lastPrecipitationIntensity_ - precipitationIntensity_) > 0.0001f) ||
             (presetBytesValid_ && lastPresetBytesValid_ &&
              byteBlockChanged(lastPresetBytes_, presetBytes_));
 
@@ -168,6 +184,12 @@ void EnvironmentInspector::sample() noexcept {
     lastHasSnow_ = hasSnow_;
     lastHasFog_ = hasFog_;
     lastPaused_ = timePaused_;
+
+    lastPrecipitationAvailable_ = precipitationAvailable_;
+    lastPrecipitationContext_ = precipitationContext_;
+    lastPrecipitationObject_ = precipitationObject_;
+    lastPrecipitationStateRaw_ = precipitationStateRaw_;
+    lastPrecipitationIntensity_ = precipitationIntensity_;
 
     lastPresetBytes_ = presetBytes_;
     lastPresetBytesValid_ = presetBytesValid_;
@@ -205,6 +227,37 @@ void EnvironmentInspector::logSceneChange() noexcept {
     boolLine("Preset HasSnow", lastHasSnow_, hasSnow_);
     boolLine("Preset HasFog", lastHasFog_, hasFog_);
     boolLine("TOD Paused", lastPaused_, timePaused_);
+    boolLine("Native Precipitation Available", lastPrecipitationAvailable_, precipitationAvailable_);
+
+    if (lastPrecipitationContext_ != precipitationContext_) {
+        log << std::hex << std::uppercase
+            << "Precipitation Context: 0x" << lastPrecipitationContext_
+            << " -> 0x" << precipitationContext_ << "\n"
+            << std::dec;
+    }
+
+    if (lastPrecipitationObject_ != precipitationObject_) {
+        log << std::hex << std::uppercase
+            << "Precipitation Object: 0x" << lastPrecipitationObject_
+            << " -> 0x" << precipitationObject_ << "\n"
+            << std::dec;
+    }
+
+    if (precipitationAvailable_) {
+        if (!lastPrecipitationAvailable_ ||
+            std::fabs(lastPrecipitationStateRaw_ - precipitationStateRaw_) > 0.0001f) {
+            log << "Precipitation State Raw: "
+                << lastPrecipitationStateRaw_ << " -> "
+                << precipitationStateRaw_ << "\n";
+        }
+
+        if (!lastPrecipitationAvailable_ ||
+            std::fabs(lastPrecipitationIntensity_ - precipitationIntensity_) > 0.0001f) {
+            log << "Precipitation Intensity: "
+                << lastPrecipitationIntensity_ << " -> "
+                << precipitationIntensity_ << "\n";
+        }
+    }
 
     if (presetBytesValid_ && lastPresetBytesValid_) {
         struct Block { const char* name; std::size_t begin; std::size_t end; };
@@ -287,6 +340,43 @@ void EnvironmentInspector::drawUi() noexcept {
                 ImGui::Text("%d", activePresetIndex_);
             else
                 ImGui::TextDisabled("N/A");
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Live precipitation");
+            ImGui::Separator();
+
+            if (precipitationAvailable_) {
+                ImGui::TextUnformatted("Native getter context");
+                ImGui::SameLine(260.0f);
+                ImGui::Text("0x%llX",
+                    static_cast<unsigned long long>(precipitationContext_));
+
+                ImGui::TextUnformatted("Environment object");
+                ImGui::SameLine(260.0f);
+                ImGui::Text("0x%llX",
+                    static_cast<unsigned long long>(precipitationObject_));
+
+                ImGui::TextUnformatted("Precipitation State Raw");
+                ImGui::SameLine(260.0f);
+                ImGui::Text("%.4f", precipitationStateRaw_);
+
+                ImGui::TextUnformatted("Precipitation Intensity");
+                ImGui::SameLine(260.0f);
+                ImGui::TextColored(
+                    precipitationIntensity_ > 0.001f
+                        ? ImVec4(0.30f, 0.90f, 0.48f, 1.0f)
+                        : ImVec4(0.95f, 0.35f, 0.35f, 1.0f),
+                    "%.4f", precipitationIntensity_);
+            } else {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.76f, 0.28f, 1.0f),
+                    "WAITING FOR NATIVE PRECIPITATION CONTEXT");
+                ImGui::TextWrapped(
+                    "The DLL hooks the game's own Get Environment Precipitation and "
+                    "Get Precipitation Intensity node executors. As soon as either native "
+                    "getter executes, this section resolves the same Environment object "
+                    "and reads its live +0x388 / +0x3B8 fields.");
+            }
 
             ImGui::Spacing();
             ImGui::TextUnformatted("Preset contribution fields");
