@@ -145,6 +145,10 @@ void EnvironmentInspector::sample() noexcept {
         presetBytesValid_ = false;
     }
 
+    if (firstSample_ && presetBytesValid_) {
+        logPresetSnapshot("INITIAL");
+    }
+
     if (!firstSample_) {
         const bool changed =
             lastWeatherManager_ != weatherManager_ ||
@@ -307,6 +311,82 @@ void EnvironmentInspector::logSceneChange() noexcept {
     }
 
     log << "=== END ENVIRONMENT CHANGE ===\n";
+    log.flush();
+}
+
+
+void EnvironmentInspector::logPresetSnapshot(const char* reason) noexcept {
+    if (!presetBytesValid_) return;
+
+    std::ofstream log(logPath(), std::ios::out | std::ios::app);
+    if (!log) return;
+
+    log << "=== WEATHER PRESET SNAPSHOT";
+    if (reason && *reason) log << " [" << reason << "]";
+    log << " ===\n";
+
+    log << std::hex << std::uppercase;
+    log << "WeatherManager: 0x" << weatherManager_ << "\n";
+    log << "Preset: 0x" << weatherPreset_ << "\n";
+    log << std::dec;
+    log << "Preset Index: " << activePresetIndex_ << "\n";
+
+    struct Probe { const char* label; std::size_t off; };
+    constexpr Probe probes[] = {
+        {"GameplayRain A", 0x060},
+        {"GameplayRain B", 0x064},
+        {"GameplayRain C", 0x068},
+        {"GameplayRain D", 0x06C},
+        {"GraphicsRain A", 0x0B0},
+        {"GraphicsRain B", 0x0B4},
+        {"GraphicsRain C", 0x0B8},
+        {"GraphicsRain D", 0x0BC},
+        {"Temperature A", 0x100},
+        {"Temperature B", 0x104},
+        {"Temperature C", 0x108},
+        {"Temperature D", 0x10C},
+        {"ViewDistance A", 0x150},
+        {"ViewDistance B", 0x154},
+        {"ViewDistance C", 0x158},
+        {"ViewDistance D", 0x15C},
+        {"OutdoorFog A", 0x1A0},
+        {"OutdoorFog B", 0x1A4},
+        {"OutdoorFog C", 0x1A8},
+        {"OutdoorFog D", 0x1AC},
+        {"CloudCoverage A", 0x1F0},
+        {"CloudCoverage B", 0x1F4},
+        {"CloudCoverage C", 0x1F8},
+        {"CloudCoverage D", 0x1FC},
+        {"WindDirection A", 0x240},
+        {"WindDirection B", 0x244},
+        {"WindDirection C", 0x248},
+        {"WindDirection D", 0x24C},
+        {"WindStrength A", 0x290},
+        {"WindStrength B", 0x294},
+        {"WindStrength C", 0x298},
+        {"WindStrength D", 0x29C},
+    };
+
+    for (const auto& p : probes) {
+        float v{};
+        std::uint32_t raw{};
+        std::memcpy(&raw, presetBytes_.data() + p.off, sizeof(raw));
+        v = std::bit_cast<float>(raw);
+
+        log << p.label << " +0x"
+            << std::hex << std::uppercase << p.off
+            << " raw=0x" << std::setw(8) << std::setfill('0') << raw
+            << std::setfill(' ') << std::dec;
+
+        if (std::isfinite(v) && std::fabs(v) < 1000000.0f)
+            log << " float=" << v;
+
+        log << "\n";
+    }
+
+    log << "Snow candidate +0x2B8 = " << (hasSnow_ ? 1 : 0) << "\n";
+    log << "Fog candidate  +0x2B9 = " << (hasFog_ ? 1 : 0) << "\n";
+    log << "=== END WEATHER PRESET SNAPSHOT ===\n";
     log.flush();
 }
 
@@ -473,10 +553,13 @@ void EnvironmentInspector::drawUi() noexcept {
             stateRow("Wind Strength field", windStrengthField_, weatherAvailable_);
 
             ImGui::Spacing();
-            ImGui::TextUnformatted("Preset flags");
+            ImGui::TextUnformatted("Unvalidated preset bytes");
             ImGui::Separator();
-            stateRow("Has Snow", hasSnow_, weatherAvailable_);
-            stateRow("Has Fog", hasFog_, weatherAvailable_);
+            ImGui::Text("Snow candidate (+0x2B8): %u", hasSnow_ ? 1u : 0u);
+            ImGui::Text("Fog candidate  (+0x2B9): %u", hasFog_ ? 1u : 0u);
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.76f, 0.28f, 1.0f),
+                "These two bytes are NOT yet validated as live Snow/Fog state.");
 
             ImGui::Spacing();
             ImGui::TextUnformatted("Live weather decoding");
