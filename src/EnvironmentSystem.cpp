@@ -421,6 +421,17 @@ bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept 
         addCandidate(off, object);
     }
 
+    if (readable(managerAddress + 0x18, sizeof(std::uintptr_t))) {
+        const auto object = *reinterpret_cast<const std::uintptr_t*>(managerAddress + 0x18);
+        out.manager18Object = object;
+        if (object && readable(object, out.manager18Raw.size())) {
+            std::memcpy(out.manager18Raw.data(),
+                        reinterpret_cast<const void*>(object),
+                        out.manager18Raw.size());
+            out.manager18RawValid = true;
+        }
+    }
+
     return true;
 }
 
