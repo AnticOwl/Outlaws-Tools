@@ -26,6 +26,21 @@ std::filesystem::path logPath() {
     return p;
 }
 
+void appendRawLog(const char* text) {
+    if (!text) return;
+    std::ofstream log(logPath(), std::ios::out | std::ios::app);
+    if (!log) return;
+    log << text << "\n";
+    log.flush();
+}
+
+void appendHr(const char* stage, HRESULT hr) {
+    char line[256]{};
+    std::snprintf(line, sizeof(line), "UI %s hr=0x%08lX", stage ? stage : "<stage>",
+                  static_cast<unsigned long>(hr));
+    appendRawLog(line);
+}
+
 bool floatChanged(float a, float b) noexcept {
     if (!std::isfinite(a) || !std::isfinite(b)) return a != b;
     return std::fabs(a - b) > 0.0001f;
@@ -101,12 +116,22 @@ void EnvironmentInspector::toggle() noexcept {
 
 DWORD WINAPI EnvironmentInspector::threadProc(LPVOID param) {
     auto* self = static_cast<EnvironmentInspector*>(param);
-    if (!self || !self->createWindow()) {
-        if (self) self->running_ = false;
+    appendRawLog("UI thread entered");
+
+    if (!self) {
+        appendRawLog("UI thread self = null");
         return 0;
     }
 
+    if (!self->createWindow()) {
+        appendRawLog("UI createWindow FAILED");
+        self->running_ = false;
+        return 0;
+    }
+    appendRawLog("UI createWindow OK");
+
     ImGui::CreateContext();
+    appendRawLog("UI ImGui::CreateContext OK");
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;
@@ -122,8 +147,15 @@ DWORD WINAPI EnvironmentInspector::threadProc(LPVOID param) {
     style.WindowPadding = ImVec2(12.0f, 12.0f);
     style.ItemSpacing = ImVec2(8.0f, 6.0f);
 
-    ImGui_ImplWin32_Init(self->hwnd_);
-    ImGui_ImplDX11_Init(self->device_, self->deviceContext_);
+    const bool win32Ok = ImGui_ImplWin32_Init(self->hwnd_);
+    appendRawLog(win32Ok ? "UI ImGui Win32 init OK" : "UI ImGui Win32 init FAILED");
+
+    const bool dx11Ok = ImGui_ImplDX11_Init(self->device_, self->deviceContext_);
+    appendRawLog(dx11Ok ? "UI ImGui DX11 init OK" : "UI ImGui DX11 init FAILED");
+
+    if (!win32Ok || !dx11Ok) {
+        self->running_ = false;
+    }
 
     self->appendLog("Environment Monitor ImGui started");
     self->sample();
@@ -174,8 +206,16 @@ bool EnvironmentInspector::createWindow() noexcept {
     wc.hInstance = instance;
     wc.lpszClassName = L"OutlawsEnvironmentInspectorImGui";
 
-    if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-        return false;
+    if (!RegisterClassExW(&wc)) {
+        const DWORD err = GetLastError();
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "UI RegisterClassExW failed err=%lu",
+                      static_cast<unsigned long>(err));
+        appendRawLog(line);
+        if (err != ERROR_CLASS_ALREADY_EXISTS) return false;
+    } else {
+        appendRawLog("UI RegisterClassExW OK");
+    }
 
     hwnd_ = CreateWindowExW(
         WS_EX_TOOLWINDOW,
@@ -185,15 +225,25 @@ bool EnvironmentInspector::createWindow() noexcept {
         80, 80, 760, 820,
         nullptr, nullptr, instance, this);
 
-    if (!hwnd_) return false;
+    if (!hwnd_) {
+        char line[192]{};
+        std::snprintf(line, sizeof(line), "UI CreateWindowExW failed err=%lu",
+                      static_cast<unsigned long>(GetLastError()));
+        appendRawLog(line);
+        return false;
+    }
+    appendRawLog("UI CreateWindowExW OK");
+
     if (!createDeviceD3D(hwnd_)) {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
         return false;
     }
 
-    ShowWindow(hwnd_, SW_SHOWDEFAULT);
+    ShowWindow(hwnd_, SW_SHOW);
+    SetForegroundWindow(hwnd_);
     UpdateWindow(hwnd_);
+    appendRawLog("UI ShowWindow OK");
     return true;
 }
 
@@ -228,7 +278,7 @@ bool EnvironmentInspector::createDeviceD3D(HWND hwnd) noexcept {
     };
     D3D_FEATURE_LEVEL featureLevel{};
 
-    const HRESULT hr = D3D11CreateDeviceAndSwapChain(
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
@@ -242,8 +292,29 @@ bool EnvironmentInspector::createDeviceD3D(HWND hwnd) noexcept {
         &featureLevel,
         &deviceContext_);
 
+    appendHr("D3D11 hardware", hr);
+
+    if (FAILED(hr)) {
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr,
+            D3D_DRIVER_TYPE_WARP,
+            nullptr,
+            0,
+            featureLevels,
+            static_cast<UINT>(std::size(featureLevels)),
+            D3D11_SDK_VERSION,
+            &sd,
+            &swapChain_,
+            &device_,
+            &featureLevel,
+            &deviceContext_);
+        appendHr("D3D11 WARP", hr);
+    }
+
     if (FAILED(hr)) return false;
+
     createRenderTarget();
+    appendRawLog(renderTargetView_ ? "UI render target OK" : "UI render target FAILED");
     return renderTargetView_ != nullptr;
 }
 
