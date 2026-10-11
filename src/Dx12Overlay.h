@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
+#include <imgui_impl_dx12.h>
 #include <atomic>
 #include <cstdint>
 #include <vector>
@@ -46,10 +47,10 @@ private:
     void render(IDXGISwapChain* swapChain) noexcept;
     void waitForFrame(FrameContext& frame) noexcept;
 
-    static void allocSrv(struct ImGui_ImplDX12_InitInfo* info,
+    static void allocSrv(ImGui_ImplDX12_InitInfo* info,
                          D3D12_CPU_DESCRIPTOR_HANDLE* cpu,
                          D3D12_GPU_DESCRIPTOR_HANDLE* gpu);
-    static void freeSrv(struct ImGui_ImplDX12_InitInfo* info,
+    static void freeSrv(ImGui_ImplDX12_InitInfo* info,
                         D3D12_CPU_DESCRIPTOR_HANDLE cpu,
                         D3D12_GPU_DESCRIPTOR_HANDLE gpu);
 
