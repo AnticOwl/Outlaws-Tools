@@ -53,6 +53,12 @@ private:
     bool hasSnow_{};
     bool hasFog_{};
 
+    bool precipitationAvailable_{};
+    std::uintptr_t precipitationContext_{};
+    std::uintptr_t precipitationObject_{};
+    float precipitationStateRaw_{};
+    float precipitationIntensity_{};
+
     bool firstSample_{true};
 
     std::uintptr_t lastWeatherManager_{};
@@ -79,6 +85,12 @@ private:
     bool lastHasSnow_{};
     bool lastHasFog_{};
     bool lastPaused_{};
+
+    bool lastPrecipitationAvailable_{};
+    std::uintptr_t lastPrecipitationContext_{};
+    std::uintptr_t lastPrecipitationObject_{};
+    float lastPrecipitationStateRaw_{};
+    float lastPrecipitationIntensity_{};
 
     std::array<std::uint8_t, 0x2C0> presetBytes_{};
     std::array<std::uint8_t, 0x2C0> lastPresetBytes_{};
