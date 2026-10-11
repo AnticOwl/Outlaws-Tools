@@ -17,6 +17,7 @@ private:
     void appendLog(const char* text) const noexcept;
     void logSceneChange() noexcept;
     void logPresetSnapshot(const char* reason) noexcept;
+    void logFullWeatherSnapshot(const char* reason) noexcept;
 
     EnvironmentSystem* environment_{};
     std::uintptr_t moduleBase_{};
@@ -58,7 +59,7 @@ private:
     std::uintptr_t precipitationObject_{};
     float precipitationStateRaw_{};
     float precipitationIntensity_{};
-    std::array<PrecipitationCandidate, 12> precipitationCandidates_{};
+    std::array<PrecipitationCandidate, 64> precipitationCandidates_{};
     std::uint32_t precipitationCandidateCount_{};
 
     bool firstSample_{true};
@@ -93,6 +94,13 @@ private:
     std::uintptr_t lastPrecipitationObject_{};
     float lastPrecipitationStateRaw_{};
     float lastPrecipitationIntensity_{};
+    std::array<PrecipitationCandidate, 64> lastPrecipitationCandidates_{};
+    std::uint32_t lastPrecipitationCandidateCount_{};
+
+    std::array<std::uint8_t, 0x360> managerBytes_{};
+    std::array<std::uint8_t, 0x360> lastManagerBytes_{};
+    bool managerBytesValid_{};
+    bool lastManagerBytesValid_{};
 
     std::array<std::uint8_t, 0x2C0> presetBytes_{};
     std::array<std::uint8_t, 0x2C0> lastPresetBytes_{};
