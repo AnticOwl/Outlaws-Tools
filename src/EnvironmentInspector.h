@@ -104,6 +104,13 @@ private:
 
     std::array<std::uint8_t, 0x2C0> presetBytes_{};
     std::array<std::uint8_t, 0x2C0> lastPresetBytes_{};
+
+    std::uintptr_t manager18Object_{};
+    std::uintptr_t lastManager18Object_{};
+    std::array<std::uint8_t, 0x400> manager18Bytes_{};
+    std::array<std::uint8_t, 0x400> lastManager18Bytes_{};
+    bool manager18BytesValid_{};
+    bool lastManager18BytesValid_{};
     bool presetBytesValid_{};
     bool lastPresetBytesValid_{};
 };
