@@ -79,8 +79,7 @@ void Dx12Overlay::stop() noexcept {
     shutdownImGui();
     removeHooks();
 
-    if (auto* queue = commandQueue_.exchange(nullptr))
-        queue->Release();
+    commandQueue_.store(nullptr, std::memory_order_relaxed);
 
     inspector_ = nullptr;
     instance_ = nullptr;
@@ -242,11 +241,9 @@ void __stdcall Dx12Overlay::hookExecuteCommandLists(
     if (self && queue && self->running_.load()) {
         const auto desc = queue->GetDesc();
         if (desc.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-            ID3D12CommandQueue* expected = nullptr;
-            if (self->commandQueue_.compare_exchange_strong(expected, queue)) {
-                queue->AddRef();
-                self->log("DX12 game DIRECT command queue captured");
-            }
+            auto* previous = self->commandQueue_.exchange(queue, std::memory_order_relaxed);
+            if (previous != queue)
+                self->log("DX12 active DIRECT command queue updated");
         }
     }
 
@@ -262,13 +259,8 @@ HRESULT __stdcall Dx12Overlay::hookPresent(IDXGISwapChain* swapChain, UINT syncI
             self->initializeForSwapChain(swapChain);
         }
 
-        if (self->initialized_.load()) {
-            if ((GetAsyncKeyState(VK_F10) & 1) != 0)
-                self->toggle();
-
-            if (self->visible_.load())
-                self->render(swapChain);
-        }
+        if (self->initialized_.load() && self->visible_.load())
+            self->render(swapChain);
     }
 
     return originalPresent_ ? originalPresent_(swapChain, syncInterval, flags) : S_OK;
