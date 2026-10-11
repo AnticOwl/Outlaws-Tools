@@ -65,6 +65,7 @@ private:
     std::atomic_bool running_{};
     std::atomic_bool initialized_{};
     std::atomic_bool visible_{true};
+    bool f10WasDown_{};
     std::atomic<ID3D12CommandQueue*> commandQueue_{};
 
     IDXGISwapChain3* swapChain_{};
