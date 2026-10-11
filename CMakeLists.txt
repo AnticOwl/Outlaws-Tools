@@ -8,6 +8,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+FetchContent_Declare(
+    minhook
+    URL https://github.com/TsudaKageyu/minhook/archive/refs/tags/v1.3.4.zip
+)
+FetchContent_MakeAvailable(minhook)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -20,13 +26,14 @@ add_library(OutlawsTools SHARED
     src/LightSystem.cpp
     src/EnvironmentSystem.cpp
     src/EnvironmentInspector.cpp
+    src/Dx12Overlay.cpp
     src/PostProcessSystem.cpp
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
 )
 
 target_include_directories(OutlawsTools PRIVATE
@@ -39,4 +46,4 @@ if(MSVC)
     target_compile_options(OutlawsTools PRIVATE /W4 /permissive-)
 endif()
 
-target_link_libraries(OutlawsTools PRIVATE user32 gdi32 d3d11 dxgi dwmapi)
+target_link_libraries(OutlawsTools PRIVATE user32 gdi32 d3d12 dxgi dwmapi minhook)
