@@ -1,10 +1,9 @@
 #pragma once
+#include "EnvironmentSystem.h"
 #include <cstdint>
 #include <array>
 
 namespace outlaws {
-
-class EnvironmentSystem;
 
 class EnvironmentInspector {
 public:
