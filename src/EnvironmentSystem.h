@@ -63,6 +63,13 @@ struct WeatherSceneState {
     // guessing field semantics or writing to the game.
     std::array<std::uint8_t, 0x360> managerRaw{};
     std::array<std::uint8_t, 0x2C0> presetRaw{};
+
+    // Focused read-only probe for the stable object referenced by manager+0x18.
+    // The broad logger showed +0x388/+0x3B8 moving in lockstep, so capture the
+    // surrounding object to identify the real semantic fields instead of guessing.
+    std::uintptr_t manager18Object{};
+    std::array<std::uint8_t, 0x400> manager18Raw{};
+    bool manager18RawValid{};
 };
 
 class EnvironmentSystem {
