@@ -565,11 +565,6 @@ LRESULT CALLBACK Dx12Overlay::hookWndProc(HWND hwnd, UINT msg, WPARAM wParam, LP
     auto* self = instance_;
     if (!self) return DefWindowProcW(hwnd, msg, wParam, lParam);
 
-    if (msg == WM_KEYUP && wParam == VK_F10) {
-        self->toggle();
-        return 0;
-    }
-
     if (self->visible_.load() && ImGui::GetCurrentContext()) {
         if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
             return 1;
