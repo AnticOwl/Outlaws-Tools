@@ -837,6 +837,51 @@ void EnvironmentInspector::drawUi() noexcept {
                 "plus DWORD diffs whenever any tracked value changes. No weather memory is written.");
 
             ImGui::Spacing();
+            ImGui::TextUnformatted("Manual weather markers");
+            ImGui::Separator();
+            ImGui::TextWrapped(
+                "Use these while the corresponding weather is visibly active. "
+                "They only write a label to OutlawsTools.log and take a full read-only snapshot.");
+
+            auto markWeather = [&](const char* label) {
+                char line[128]{};
+                std::snprintf(line, sizeof(line), "=== USER WEATHER MARKER: %s ===", label);
+                appendLog(line);
+                logFullWeatherSnapshot(label);
+            };
+
+            if (ImGui::Button("MARK CLEAR", ImVec2(120, 32))) markWeather("CLEAR");
+            ImGui::SameLine();
+            if (ImGui::Button("MARK RAIN", ImVec2(120, 32))) markWeather("RAIN");
+            ImGui::SameLine();
+            if (ImGui::Button("MARK FOG", ImVec2(120, 32))) markWeather("FOG");
+
+            if (ImGui::Button("MARK SNOW", ImVec2(120, 32))) markWeather("SNOW");
+            ImGui::SameLine();
+            if (ImGui::Button("MARK STORM", ImVec2(120, 32))) markWeather("STORM");
+            ImGui::SameLine();
+            if (ImGui::Button("SNAPSHOT NOW", ImVec2(120, 32))) markWeather("MANUAL");
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Focused object profile");
+            ImGui::Separator();
+            if (manager18BytesValid_) {
+                auto readFocused = [&](std::size_t off) {
+                    float value{};
+                    std::memcpy(&value, manager18Bytes_.data() + off, sizeof(value));
+                    return value;
+                };
+                ImGui::Text("+0x220 / +0x224 / +0x228 : %.6f / %.6f / %.6f",
+                            readFocused(0x220), readFocused(0x224), readFocused(0x228));
+                ImGui::Text("+0x358 / +0x360 / +0x364 : %.6f / %.6f / %.6f",
+                            readFocused(0x358), readFocused(0x360), readFocused(0x364));
+                ImGui::TextDisabled("+0x388 / +0x3B8 : %.6f / %.6f",
+                                    readFocused(0x388), readFocused(0x3B8));
+            } else {
+                ImGui::TextDisabled("manager+0x18 object unavailable");
+            }
+
+            ImGui::Spacing();
             ImGui::TextDisabled("F10 toggles the in-game overlay.");
 
             ImGui::EndTabItem();
