@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <array>
 
 namespace outlaws {
 
@@ -78,6 +79,11 @@ private:
     bool lastHasSnow_{};
     bool lastHasFog_{};
     bool lastPaused_{};
+
+    std::array<std::uint8_t, 0x2C0> presetBytes_{};
+    std::array<std::uint8_t, 0x2C0> lastPresetBytes_{};
+    bool presetBytesValid_{};
+    bool lastPresetBytesValid_{};
 };
 
 }
