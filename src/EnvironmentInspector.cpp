@@ -117,6 +117,8 @@ void EnvironmentInspector::sample() noexcept {
         precipitationObject_ = weather.precipitationObject;
         precipitationStateRaw_ = weather.precipitationStateRaw;
         precipitationIntensity_ = weather.precipitationIntensity;
+        precipitationCandidates_ = weather.precipitationCandidates;
+        precipitationCandidateCount_ = weather.precipitationCandidateCount;
 
         presetBytes_ = weather.presetRaw;
         presetBytesValid_ = weatherPreset_ != 0;
@@ -139,6 +141,7 @@ void EnvironmentInspector::sample() noexcept {
         precipitationObject_ = 0;
         precipitationStateRaw_ = 0.0f;
         precipitationIntensity_ = 0.0f;
+        precipitationCandidateCount_ = 0;
         presetBytesValid_ = false;
     }
 
@@ -370,12 +373,52 @@ void EnvironmentInspector::drawUi() noexcept {
             } else {
                 ImGui::TextColored(
                     ImVec4(1.0f, 0.76f, 0.28f, 1.0f),
-                    "WAITING FOR NATIVE PRECIPITATION CONTEXT");
+                    "NATIVE SCRIPT GETTER NOT ACTIVE IN THIS SCENE");
                 ImGui::TextWrapped(
-                    "The DLL hooks the game's own Get Environment Precipitation and "
-                    "Get Precipitation Intensity node executors. As soon as either native "
-                    "getter executes, this section resolves the same Environment object "
-                    "and reads its live +0x388 / +0x3B8 fields.");
+                    "The script nodes are not being called continuously here. "
+                    "Fallback owner scanning is active below.");
+            }
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Live precipitation candidates");
+            ImGui::Separator();
+
+            if (precipitationCandidateCount_ == 0) {
+                ImGui::TextDisabled("No plausible +0x388/+0x3B8 candidates found.");
+            } else {
+                if (ImGui::BeginTable("PrecipCandidates", 4,
+                    ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("Owner +");
+                    ImGui::TableSetupColumn("Object");
+                    ImGui::TableSetupColumn("State");
+                    ImGui::TableSetupColumn("Intensity");
+                    ImGui::TableHeadersRow();
+
+                    for (std::uint32_t i = 0; i < precipitationCandidateCount_; ++i) {
+                        const auto& c = precipitationCandidates_[i];
+                        ImGui::TableNextRow();
+
+                        ImGui::TableSetColumnIndex(0);
+                        if (c.ownerOffset == 0xFFFFFFFFu)
+                            ImGui::TextUnformatted("SELF");
+                        else
+                            ImGui::Text("+0x%X", c.ownerOffset);
+
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("0x%llX", static_cast<unsigned long long>(c.object));
+
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::Text("%.4f", c.stateRaw);
+
+                        ImGui::TableSetColumnIndex(3);
+                        if (c.intensity > 0.001f)
+                            ImGui::TextColored(ImVec4(0.30f,0.90f,0.48f,1.0f), "%.4f", c.intensity);
+                        else
+                            ImGui::Text("%.4f", c.intensity);
+                    }
+
+                    ImGui::EndTable();
+                }
             }
 
             ImGui::Spacing();
