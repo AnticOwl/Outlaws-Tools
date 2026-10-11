@@ -176,6 +176,10 @@ void EnvironmentInspector::sample() noexcept {
         managerBytes_ = weather.managerRaw;
         managerBytesValid_ = weatherManager_ != 0;
         presetBytes_ = weather.presetRaw;
+
+        manager18Object_ = weather.manager18Object;
+        manager18Bytes_ = weather.manager18Raw;
+        manager18BytesValid_ = weather.manager18RawValid;
         presetBytesValid_ = weatherPreset_ != 0;
     } else {
         weatherManager_ = 0;
@@ -198,6 +202,8 @@ void EnvironmentInspector::sample() noexcept {
         precipitationIntensity_ = 0.0f;
         precipitationCandidateCount_ = 0;
         managerBytesValid_ = false;
+        manager18Object_ = 0;
+        manager18BytesValid_ = false;
         presetBytesValid_ = false;
     }
 
@@ -229,8 +235,11 @@ void EnvironmentInspector::sample() noexcept {
             (precipitationAvailable_ && std::fabs(lastPrecipitationStateRaw_ - precipitationStateRaw_) > 0.0001f) ||
             (precipitationAvailable_ && std::fabs(lastPrecipitationIntensity_ - precipitationIntensity_) > 0.0001f) ||
             precipitationCandidateCount_ != lastPrecipitationCandidateCount_ ||
+            manager18Object_ != lastManager18Object_ ||
             (managerBytesValid_ && lastManagerBytesValid_ &&
              byteBlockChanged(lastManagerBytes_, managerBytes_)) ||
+            (manager18BytesValid_ && lastManager18BytesValid_ &&
+             byteBlockChanged(lastManager18Bytes_, manager18Bytes_)) ||
             (presetBytesValid_ && lastPresetBytesValid_ &&
              byteBlockChanged(lastPresetBytes_, presetBytes_));
 
@@ -276,6 +285,9 @@ void EnvironmentInspector::sample() noexcept {
 
     lastManagerBytes_ = managerBytes_;
     lastManagerBytesValid_ = managerBytesValid_;
+    lastManager18Object_ = manager18Object_;
+    lastManager18Bytes_ = manager18Bytes_;
+    lastManager18BytesValid_ = manager18BytesValid_;
     lastPresetBytes_ = presetBytes_;
     lastPresetBytesValid_ = presetBytesValid_;
     firstSample_ = false;
@@ -392,6 +404,22 @@ void EnvironmentInspector::logSceneChange() noexcept {
         dumpRawDiff(log, "WEATHER MANAGER", lastManagerBytes_, managerBytes_);
     if (presetBytesValid_ && lastPresetBytesValid_)
         dumpRawDiff(log, "WEATHER PRESET", lastPresetBytes_, presetBytes_);
+    if (manager18BytesValid_ && lastManager18BytesValid_)
+        dumpRawDiff(log, "MANAGER+0x18 OBJECT", lastManager18Bytes_, manager18Bytes_);
+
+    if (manager18BytesValid_) {
+        float state{}, intensity{};
+        std::memcpy(&state, manager18Bytes_.data() + 0x388, sizeof(state));
+        std::memcpy(&intensity, manager18Bytes_.data() + 0x3B8, sizeof(intensity));
+        const float derived = 0.5f + state * 0.1f;
+        log << "-- MANAGER+0x18 RELATION TEST --\n";
+        log << std::hex << std::uppercase
+            << "object=0x" << manager18Object_ << std::dec
+            << " state(+0x388)=" << state
+            << " intensity(+0x3B8)=" << intensity
+            << " expected(0.5+state*0.1)=" << derived
+            << " error=" << std::fabs(intensity - derived) << "\n";
+    }
 
     log << "-- PRECIPITATION CANDIDATES --\n";
     log << "count=" << precipitationCandidateCount_ << "\n";
@@ -439,6 +467,19 @@ void EnvironmentInspector::logFullWeatherSnapshot(const char* reason) noexcept {
         dumpRawDwords(log, "WEATHER MANAGER", managerBytes_);
     if (presetBytesValid_)
         dumpRawDwords(log, "WEATHER PRESET", presetBytes_);
+    if (manager18BytesValid_) {
+        log << std::hex << std::uppercase
+            << "Manager+0x18 object: 0x" << manager18Object_ << "\n"
+            << std::dec;
+        dumpRawDwords(log, "MANAGER+0x18 OBJECT", manager18Bytes_);
+        float state{}, intensity{};
+        std::memcpy(&state, manager18Bytes_.data() + 0x388, sizeof(state));
+        std::memcpy(&intensity, manager18Bytes_.data() + 0x3B8, sizeof(intensity));
+        log << "Manager+0x18 relation: state=" << state
+            << " intensity=" << intensity
+            << " expected=" << (0.5f + state * 0.1f)
+            << " error=" << std::fabs(intensity - (0.5f + state * 0.1f)) << "\n";
+    }
 
     log << "-- PRECIPITATION CANDIDATES FULL --\n";
     log << "count=" << precipitationCandidateCount_ << "\n";
@@ -598,6 +639,27 @@ void EnvironmentInspector::drawUi() noexcept {
                 ImGui::TextWrapped(
                     "The script nodes are not being called continuously here. "
                     "Fallback owner scanning is active below.");
+            }
+
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Focused manager transition probe");
+            ImGui::Separator();
+            ptrRow("Manager +0x18 object", manager18Object_);
+            if (managerBytesValid_) {
+                float m138{}, m148{};
+                std::memcpy(&m138, managerBytes_.data() + 0x138, sizeof(m138));
+                std::memcpy(&m148, managerBytes_.data() + 0x148, sizeof(m148));
+                ImGui::Text("Manager +0x138: %.6f", m138);
+                ImGui::Text("Manager +0x148: %.6f", m148);
+            }
+            if (manager18BytesValid_) {
+                float s{}, in{};
+                std::memcpy(&s, manager18Bytes_.data() + 0x388, sizeof(s));
+                std::memcpy(&in, manager18Bytes_.data() + 0x3B8, sizeof(in));
+                ImGui::Text("Object +0x388: %.6f", s);
+                ImGui::Text("Object +0x3B8: %.6f", in);
+                ImGui::TextDisabled("relation error vs 0.5 + 0.1*state: %.8f",
+                                    std::fabs(in - (0.5f + 0.1f * s)));
             }
 
             ImGui::Spacing();
