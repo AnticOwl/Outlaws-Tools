@@ -7,9 +7,27 @@
 #include <fstream>
 #include <cstring>
 #include <limits>
+#include <atomic>
+#include <MinHook.h>
 
 namespace outlaws {
 namespace {
+
+using NativePrecipExecFn = void(__fastcall*)(void*, void*);
+std::atomic<std::uintptr_t> gPrecipitationContext{};
+NativePrecipExecFn gOriginalGetEnvironmentPrecipitation{};
+NativePrecipExecFn gOriginalGetPrecipitationIntensity{};
+
+void __fastcall hookGetEnvironmentPrecipitation(void* self, void* context) {
+    if (context) gPrecipitationContext.store(reinterpret_cast<std::uintptr_t>(context), std::memory_order_relaxed);
+    if (gOriginalGetEnvironmentPrecipitation) gOriginalGetEnvironmentPrecipitation(self, context);
+}
+
+void __fastcall hookGetPrecipitationIntensity(void* self, void* context) {
+    if (context) gPrecipitationContext.store(reinterpret_cast<std::uintptr_t>(context), std::memory_order_relaxed);
+    if (gOriginalGetPrecipitationIntensity) gOriginalGetPrecipitationIntensity(self, context);
+}
+
 bool readable(std::uintptr_t address, std::size_t size) noexcept {
     if (!address || !size) return false;
     MEMORY_BASIC_INFORMATION mbi{};
@@ -25,6 +43,55 @@ bool readable(std::uintptr_t address, std::size_t size) noexcept {
     return address >= begin && address + size >= address && address + size <= end;
 }
 
+
+std::uintptr_t resolvePrecipitationObjectFromContext(std::uintptr_t context, std::uintptr_t moduleBase) noexcept {
+    if (!context || !moduleBase || !readable(context + 0x830, sizeof(std::uintptr_t))) return 0;
+
+    const auto entryOwner = *reinterpret_cast<const std::uintptr_t*>(context + 0x830);
+    if (!entryOwner || !readable(entryOwner, 0x10)) return 0;
+
+    const auto entries = *reinterpret_cast<const std::uintptr_t*>(entryOwner + 0x0);
+    const auto count = *reinterpret_cast<const std::uint32_t*>(entryOwner + 0x8);
+    if (!entries || count == 0 || count > 0x1000) return 0;
+
+    const auto typeA = moduleBase + 0x8A17F88;
+    const auto typeB = moduleBase + 0x89E8820;
+    const auto typeC = moduleBase + 0x89E6F08;
+
+    auto findEntryObject = [&](std::uintptr_t type) -> std::uintptr_t {
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const auto e = entries + static_cast<std::uintptr_t>(i) * 0x20u;
+            if (!readable(e, 0x20)) break;
+            if (*reinterpret_cast<const std::uintptr_t*>(e + 0x18) == type)
+                return *reinterpret_cast<const std::uintptr_t*>(e + 0x00);
+        }
+        return 0;
+    };
+
+    if (const auto direct = findEntryObject(typeA)) {
+        if (readable(direct + 0x3BC, 4)) return direct;
+    }
+
+    if (const auto b = findEntryObject(typeB)) {
+        if (readable(b + 0x88, sizeof(std::uintptr_t))) {
+            const auto object = *reinterpret_cast<const std::uintptr_t*>(b + 0x80);
+            if (object && readable(object + 0x3BC, 4)) return object;
+        }
+    }
+
+    if (const auto c = findEntryObject(typeC)) {
+        if (readable(c, sizeof(std::uintptr_t))) {
+            const auto p = *reinterpret_cast<const std::uintptr_t*>(c);
+            if (p && readable(p + 0x298, sizeof(std::uintptr_t))) {
+                const auto object = *reinterpret_cast<const std::uintptr_t*>(p + 0x290);
+                if (object && readable(object + 0x3BC, 4)) return object;
+            }
+        }
+    }
+
+    return 0;
+}
+
 std::filesystem::path logPath() {
     wchar_t buffer[MAX_PATH]{};
     const auto len = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
@@ -38,11 +105,57 @@ std::filesystem::path logPath() {
 bool EnvironmentSystem::initialize(std::uintptr_t moduleBase) noexcept {
     moduleBase_ = moduleBase;
     appendLog(moduleBase_ ? "environment initialized" : "environment initialization failed");
+    if (moduleBase_) installPrecipitationHooks();
     return moduleBase_ != 0;
 }
 
 void EnvironmentSystem::shutdown() noexcept {
+    gPrecipitationContext.store(0, std::memory_order_relaxed);
     moduleBase_ = 0;
+}
+
+
+bool EnvironmentSystem::installPrecipitationHooks() noexcept {
+    if (!moduleBase_) return false;
+
+    const auto init = MH_Initialize();
+    if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED) {
+        appendLog("precipitation hooks: MinHook initialize failed");
+        return false;
+    }
+
+    const auto stateTarget = reinterpret_cast<void*>(moduleBase_ + GetEnvironmentPrecipitationExecRva);
+    const auto intensityTarget = reinterpret_cast<void*>(moduleBase_ + GetPrecipitationIntensityExecRva);
+
+    const auto a = MH_CreateHook(
+        stateTarget,
+        reinterpret_cast<void*>(&hookGetEnvironmentPrecipitation),
+        reinterpret_cast<void**>(&gOriginalGetEnvironmentPrecipitation));
+
+    const auto b = MH_CreateHook(
+        intensityTarget,
+        reinterpret_cast<void*>(&hookGetPrecipitationIntensity),
+        reinterpret_cast<void**>(&gOriginalGetPrecipitationIntensity));
+
+    const bool aCreated = a == MH_OK || a == MH_ERROR_ALREADY_CREATED;
+    const bool bCreated = b == MH_OK || b == MH_ERROR_ALREADY_CREATED;
+
+    if (!aCreated || !bCreated) {
+        appendLog("precipitation hooks: create failed");
+        return false;
+    }
+
+    const auto ea = MH_EnableHook(stateTarget);
+    const auto eb = MH_EnableHook(intensityTarget);
+
+    const bool aEnabled = ea == MH_OK || ea == MH_ERROR_ENABLED;
+    const bool bEnabled = eb == MH_OK || eb == MH_ERROR_ENABLED;
+
+    appendLog((aEnabled && bEnabled)
+        ? "precipitation native hooks enabled"
+        : "precipitation native hooks enable failed");
+
+    return aEnabled && bEnabled;
 }
 
 void EnvironmentSystem::appendLog(const char* text) const noexcept {
@@ -241,6 +354,24 @@ bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept 
 
     out.hasSnow = *reinterpret_cast<const std::uint8_t*>(p + 0x2B8) != 0;
     out.hasFog  = *reinterpret_cast<const std::uint8_t*>(p + 0x2B9) != 0;
+
+    const auto ctx = gPrecipitationContext.load(std::memory_order_relaxed);
+    out.precipitationContext = ctx;
+    if (ctx) {
+        const auto object = resolvePrecipitationObjectFromContext(ctx, moduleBase_);
+        out.precipitationObject = object;
+        if (object) {
+            out.precipitationStateRaw =
+                *reinterpret_cast<const float*>(object + 0x388);
+            out.precipitationIntensity =
+                *reinterpret_cast<const float*>(object + 0x3B8);
+
+            out.precipitationAvailable =
+                std::isfinite(out.precipitationStateRaw) &&
+                std::isfinite(out.precipitationIntensity);
+        }
+    }
+
     return true;
 }
 
