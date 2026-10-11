@@ -422,6 +422,45 @@ void EnvironmentInspector::drawUi() noexcept {
             }
 
             ImGui::Spacing();
+            ImGui::TextUnformatted("Decoded preset candidates");
+            ImGui::Separator();
+
+            auto presetFloat = [&](std::size_t off, float& out) -> bool {
+                if (!presetBytesValid_ || off + sizeof(float) > presetBytes_.size())
+                    return false;
+                std::memcpy(&out, presetBytes_.data() + off, sizeof(float));
+                return std::isfinite(out);
+            };
+
+            float v{};
+            auto candidateRow = [&](const char* label, std::size_t off) {
+                ImGui::TextUnformatted(label);
+                ImGui::SameLine(260.0f);
+                if (presetFloat(off, v))
+                    ImGui::Text("+0x%03zX  %.4f", off, v);
+                else
+                    ImGui::TextDisabled("N/A");
+            };
+
+            candidateRow("Graphics Rain A", 0x0B0);
+            candidateRow("Graphics Rain B", 0x0B4);
+            candidateRow("Graphics Rain C", 0x0B8);
+            candidateRow("Temperature A", 0x100);
+            candidateRow("Temperature B", 0x104);
+            candidateRow("Temperature C", 0x108);
+            candidateRow("Temperature D", 0x10C);
+            candidateRow("Outdoor Fog A", 0x1A0);
+            candidateRow("Outdoor Fog B", 0x1A4);
+            candidateRow("Wind Strength A", 0x290);
+            candidateRow("Wind Strength B", 0x294);
+            candidateRow("Wind Strength C", 0x298);
+            candidateRow("Wind Strength D", 0x29C);
+
+            ImGui::TextDisabled(
+                "Candidate labels are provisional. Values are read-only and come from "
+                "the active WeatherPreset blocks that changed between scenes.");
+
+            ImGui::Spacing();
             ImGui::TextUnformatted("Preset contribution fields");
             ImGui::Separator();
             stateRow("Gameplay Rain field", gameplayRainField_, weatherAvailable_);
