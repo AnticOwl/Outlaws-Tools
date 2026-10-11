@@ -16,6 +16,7 @@ private:
     void drawUi() noexcept;
     void appendLog(const char* text) const noexcept;
     void logSceneChange() noexcept;
+    void logPresetSnapshot(const char* reason) noexcept;
 
     EnvironmentSystem* environment_{};
     std::uintptr_t moduleBase_{};
