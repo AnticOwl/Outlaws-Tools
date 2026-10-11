@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <array>
 
 namespace outlaws {
 
@@ -40,6 +41,8 @@ struct WeatherSceneState {
 
     bool hasSnow{};
     bool hasFog{};
+
+    std::array<std::uint8_t, 0x2C0> presetRaw{};
 };
 
 class EnvironmentSystem {
