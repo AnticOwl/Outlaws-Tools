@@ -1,14 +1,38 @@
 #include <Windows.h>
+#include <filesystem>
+#include <fstream>
 #include "ToolRuntime.h"
 
 namespace {
+
+std::filesystem::path bootLogPath() {
+    wchar_t buffer[MAX_PATH]{};
+    const auto len = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
+    if (!len || len >= std::size(buffer)) return L"OutlawsTools.log";
+    std::filesystem::path p(buffer);
+    p.replace_filename(L"OutlawsTools.log");
+    return p;
+}
+
+void bootLog(const char* text) {
+    std::ofstream log(bootLogPath(), std::ios::out | std::ios::app);
+    if (!log) return;
+    log << text << "\n";
+    log.flush();
+}
+
 bool pressed(int vk) {
     return (GetAsyncKeyState(vk) & 1) != 0;
 }
 
 DWORD WINAPI OutlawsTools_Bootstrap(LPVOID) {
+    bootLog("BOOTSTRAP THREAD ENTERED");
     auto& runtime = outlaws::ToolRuntime::instance();
-    if (!runtime.start()) return 0;
+    if (!runtime.start()) {
+        bootLog("BOOTSTRAP runtime.start FAILED");
+        return 0;
+    }
+    bootLog("BOOTSTRAP runtime.start OK");
 
     while (runtime.running()) {
         if (pressed(VK_HOME))   runtime.environment.logTimeOfDay();
