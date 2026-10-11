@@ -372,6 +372,52 @@ bool EnvironmentSystem::readWeatherScene(WeatherSceneState& out) const noexcept 
         }
     }
 
+    // Fallback live discovery: inspect first-level pointers owned by the same
+    // Snowdrop owner that already resolves TOD. This is read-only and lets a
+    // rainy scene expose likely precipitation objects even if the script getter
+    // node is never executed.
+    auto addCandidate = [&](std::uint32_t ownerOffset, std::uintptr_t object) {
+        if (!object || out.precipitationCandidateCount >= out.precipitationCandidates.size())
+            return;
+        if (!readable(object + 0x3BC, 4))
+            return;
+
+        const float state = *reinterpret_cast<const float*>(object + 0x388);
+        const float intensity = *reinterpret_cast<const float*>(object + 0x3B8);
+
+        if (!std::isfinite(state) || !std::isfinite(intensity))
+            return;
+        if (state < -0.25f || state > 4.25f)
+            return;
+        if (intensity < -0.05f || intensity > 2.05f)
+            return;
+
+        for (std::uint32_t i = 0; i < out.precipitationCandidateCount; ++i) {
+            if (out.precipitationCandidates[i].object == object)
+                return;
+        }
+
+        auto& c = out.precipitationCandidates[out.precipitationCandidateCount++];
+        c.ownerOffset = ownerOffset;
+        c.object = object;
+        c.stateRaw = state;
+        c.intensity = intensity;
+    };
+
+    addCandidate(0xFFFFFFFFu, managerAddress);
+
+    for (std::uint32_t off = 0; off < 0x1000; off += 8) {
+        const auto address = managerAddress + off;
+        if (!readable(address, sizeof(std::uintptr_t)))
+            break;
+
+        const auto object = *reinterpret_cast<const std::uintptr_t*>(address);
+        if (object < 0x10000)
+            continue;
+
+        addCandidate(off, object);
+    }
+
     return true;
 }
 
