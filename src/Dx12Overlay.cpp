@@ -259,8 +259,15 @@ HRESULT __stdcall Dx12Overlay::hookPresent(IDXGISwapChain* swapChain, UINT syncI
             self->initializeForSwapChain(swapChain);
         }
 
-        if (self->initialized_.load() && self->visible_.load())
-            self->render(swapChain);
+        if (self->initialized_.load()) {
+            const bool f10Down = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+            if (f10Down && !self->f10WasDown_)
+                self->toggle();
+            self->f10WasDown_ = f10Down;
+
+            if (self->visible_.load())
+                self->render(swapChain);
+        }
     }
 
     return originalPresent_ ? originalPresent_(swapChain, syncInterval, flags) : S_OK;
