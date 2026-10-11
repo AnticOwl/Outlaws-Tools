@@ -58,6 +58,8 @@ private:
     std::uintptr_t precipitationObject_{};
     float precipitationStateRaw_{};
     float precipitationIntensity_{};
+    std::array<PrecipitationCandidate, 12> precipitationCandidates_{};
+    std::uint32_t precipitationCandidateCount_{};
 
     bool firstSample_{true};
 
